@@ -1,4 +1,5 @@
 #include <cmath>
+#include <print>
 
 #include <Oasis/Add.hpp>
 #include <Oasis/Divide.hpp>
@@ -8,6 +9,7 @@
 #include <Oasis/RecursiveCast.hpp>
 #include <Oasis/Subtract.hpp>
 #include <Oasis/Variable.hpp>
+#include "../io/include/Oasis/InFixSerializer.hpp"
 
 std::vector<long long> getAllFactors(long long n)
 {
@@ -51,6 +53,9 @@ namespace Oasis {
 auto Expression::FindZeros() const -> std::vector<std::unique_ptr<Expression>>
 {
     std::vector<std::unique_ptr<Expression>> results;
+
+
+
     std::vector<std::unique_ptr<Expression>> termsE;
     if (auto addCase = RecursiveCast<Add<Expression>>(*this); addCase != nullptr) {
         addCase->Flatten(termsE);
@@ -113,6 +118,27 @@ auto Expression::FindZeros() const -> std::vector<std::unique_ptr<Expression>>
             negCoefficents[flooredExponent] = Add<Expression>(*coefficent, *negCoefficents[flooredExponent]).Copy();
         }
     }
+
+    std::unique_ptr<Expression> s = this->Copy();
+    auto var = Variable{varName};
+    auto ex1192 = s->Substitute(var, Real{0});
+
+    if (ex1192->Is<Oasis::Real>()) {
+        auto simplifiedReal = dynamic_cast<Oasis::Real&>(*ex1192);
+        if (simplifiedReal.Equals(Oasis::Real{0})) {
+            Oasis::InFixSerializer serializer;
+
+            auto simplifiedExpr = this->Copy() / std::make_unique<Variable>(var);
+            auto res31 = simplifiedExpr->Accept(serializer);
+            if (res31.has_value())
+                std::println("The expression evaluated with x=0 is 0, so using simplified expr: {}", simplifiedReal.GetValue(), res31.value());
+
+            std::vector<std::unique_ptr<Expression>> rets = simplifiedExpr->FindZeros();
+            rets.emplace_back(Oasis::Real{0}.Copy());
+            return std::move(rets);
+        }
+    }
+
     while (negCoefficents.size() > 0 && RecursiveCast<Real>(*negCoefficents.back()) != nullptr && RecursiveCast<Real>(*negCoefficents.back())->GetValue() == 0) {
         negCoefficents.pop_back();
     }
@@ -142,6 +168,7 @@ auto Expression::FindZeros() const -> std::vector<std::unique_ptr<Expression>>
             termsC.push_back(lround(value));
         }
     }
+    // std::println("termsC: {}", termsC, coefficents);
     if (termsC.size() == coefficents.size()) {
         std::reverse(termsC.begin(), termsC.end());
         for (auto pv : getAllFactors(termsC.back())) {

@@ -20,6 +20,8 @@ struct SimplifyOpts {
         DEGREES,
     } angleUnits
         = AngleUnits::RADIANS;
+
+    bool simplifyFractions = true;
 };
 
 class SimplifyVisitor final : public TypedVisitor<std::expected<gsl::not_null<std::unique_ptr<Expression>>, std::string>> {

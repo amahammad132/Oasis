@@ -6,6 +6,7 @@
 
 #include "Oasis/SimplifyVisitor.hpp"
 
+#include "../io/include/Oasis/InFixSerializer.hpp"
 #include "Oasis/Add.hpp"
 #include "Oasis/Derivative.hpp"
 #include "Oasis/Divide.hpp"
@@ -23,6 +24,8 @@
 #include "Oasis/Subtract.hpp"
 #include "Oasis/Undefined.hpp"
 #include "Oasis/Variable.hpp"
+
+#include <print>
 
 namespace {
 constexpr auto EPSILON = std::numeric_limits<float>::epsilon();
@@ -91,11 +94,24 @@ auto SimplifyVisitor::TypedVisit(const Add<>& add) -> RetT
 
     Add simplifiedAdd { *simplifiedAugend, *simplifiedAddend };
 
+    // std::println("inside Add simplify visitor.");
+
     if (auto realCase = RecursiveCast<Add<Real>>(simplifiedAdd); realCase != nullptr) {
         const Real& firstReal = realCase->GetMostSigOp();
         const Real& secondReal = realCase->GetLeastSigOp();
 
         return gsl::not_null { std::make_unique<Real>(firstReal.GetValue() + secondReal.GetValue()) };
+    }
+
+    if (options.simplifyFractions) {
+        if (auto realCase = RecursiveCast<Add<Real, Divide<Real>>>(simplifiedAdd); realCase != nullptr) {
+            const Real& firstReal = realCase->GetMostSigOp();
+            const Divide<Real>& frac = realCase->GetLeastSigOp();
+
+            return gsl::not_null { std::make_unique<Divide<Real>>(Real { frac.GetLeastSigOp().GetValue() * firstReal.GetValue() + frac.GetMostSigOp().GetValue() }, frac.GetLeastSigOp()) };
+
+            // return gsl::not_null { std::make_unique<Real>(firstReal.GetValue() + secondReal.GetValue()) };
+        }
     }
 
     if (auto zeroCase = RecursiveCast<Add<Real, Expression>>(simplifiedAdd); zeroCase != nullptr) {
@@ -159,6 +175,7 @@ auto SimplifyVisitor::TypedVisit(const Add<>& add) -> RetT
         // real
         size_t i = 0;
         if (auto real = RecursiveCast<Real>(*addend); real != nullptr) {
+            std::println("real + real ({})", vals.size());
             for (; i < vals.size(); i++) {
                 if (auto valI = RecursiveCast<Real>(*vals[i]); valI != nullptr) {
                     vals[i] = Real { valI->GetValue() + real->GetValue() }.Generalize();
@@ -170,6 +187,28 @@ auto SimplifyVisitor::TypedVisit(const Add<>& add) -> RetT
                 vals.push_back(addend->Generalize());
             }
             continue;
+        }
+
+        if (options.simplifyFractions) {
+            // std::println("STILL inside Add simplify visitor.");
+            Oasis::InFixSerializer ser;
+
+            // real fraction + real
+            if (auto frac = RecursiveCast<Divide<Real>>(*addend); frac != nullptr) {
+                std::println("success (size={})", vals.size());
+                for (; i < vals.size(); i++) {
+                    if (auto valI = RecursiveCast<Real>(*vals[i]); valI != nullptr) {
+                        std::println("frac: {}, vals[i]: {}", frac->Accept(ser).value(), valI->Accept(ser).value());
+                        vals[i] = Divide { Real { frac->GetLeastSigOp().GetValue() * valI->GetValue() + frac->GetMostSigOp().GetValue() }, frac->GetLeastSigOp() }.Generalize();
+                        break;
+                    }
+                }
+                if (i >= vals.size()) {
+                    // check to make sure it is one thing only
+                    vals.push_back(frac->Generalize());
+                }
+                continue;
+            }
         }
         // single i
         if (auto img = RecursiveCast<Imaginary>(*addend); img != nullptr) {
@@ -497,6 +536,17 @@ auto SimplifyVisitor::TypedVisit(const Multiply<>& multiply) -> RetT
             return m;
         }
         return gsl::not_null { Divide<Expression> { *(m.value()), (multCase->GetLeastSigOp().GetLeastSigOp()) }.Generalize() };
+    }
+
+    if (auto multCase = RecursiveCast<Multiply<Divide<Expression>>>(simplifiedMultiply); multCase != nullptr) {
+        Oasis::InFixSerializer ser;
+        std::println("mult case: {} * {}", multCase->GetMostSigOp().Accept(ser).value(), multCase->GetLeastSigOp().Accept(ser).value());
+        auto m1 = Multiply<Expression> { multCase->GetMostSigOp().GetMostSigOp(), multCase->GetLeastSigOp().GetMostSigOp() }.Accept(*this);
+        auto m2 = Multiply<Expression> { multCase->GetMostSigOp().GetLeastSigOp(), multCase->GetLeastSigOp().GetLeastSigOp() }.Accept(*this);
+        if (!(m1 || m2)) {
+            return m1;
+        }
+        return gsl::not_null { Divide<Expression> { *(m1.value()), *(m2.value()) }.Generalize() };
     }
 
     if (auto exprCase = RecursiveCast<Multiply<Expression>>(simplifiedMultiply); exprCase != nullptr) {
@@ -839,6 +889,50 @@ auto SimplifyVisitor::TypedVisit(const Multiply<>& multiply) -> RetT
     return gsl::not_null { BuildFromVector<Multiply>(vals) };
 }
 
+bool exactly_representable_double(intmax_t a, intmax_t b) {
+    if (b == 0) return false;
+    if (a == 0) return true;
+
+    using F = double;
+    static_assert(std::numeric_limits<F>::radix == 2,
+                  "Requires binary floating point");
+
+    // reduce fraction
+    long long g = std::gcd(a, b);
+    uint64_t num = std::llabs(a / g);
+    uint64_t den = std::llabs(b / g);
+
+    // denominator must be a power of two
+    if ((den & (den - 1)) != 0) return false;
+
+    // compute k where den = 2^k
+    int k = 0;
+    while ((den >> k) != 1) ++k;
+
+    // find highest set bit of numerator
+    int msb = -1;
+    for (uint64_t t = num; t; t >>= 1) ++msb;
+
+    int exponent = msb - k;
+
+    // exponent bounds
+    int max_exp = std::numeric_limits<F>::max_exponent - 1;
+    int min_exp = std::numeric_limits<F>::min_exponent
+                  - std::numeric_limits<F>::digits;
+
+    if (exponent > max_exp) return false;
+    if (exponent < min_exp) return false;
+
+    // precision check (53-bit significand)
+    int extra_bits = msb - (std::numeric_limits<F>::digits - 1);
+    if (extra_bits > 0) {
+        uint64_t mask = (1ULL << extra_bits) - 1;
+        if (num & mask) return false;
+    }
+
+    return true;
+}
+
 auto SimplifyVisitor::TypedVisit(const Divide<>& divide) -> RetT
 {
     auto mostSigOp = divide.GetMostSigOp().Copy();
@@ -868,7 +962,65 @@ auto SimplifyVisitor::TypedVisit(const Divide<>& divide) -> RetT
     if (auto realCase = RecursiveCast<Divide<Real>>(simplifiedDivide); realCase != nullptr) {
         const Real& dividend = realCase->GetMostSigOp();
         const Real& divisor = realCase->GetLeastSigOp();
+
+        std::println("dividend: {}, divisor: {}", dividend.GetValue(), divisor.GetValue());
+
+        // 5 3 1 4 6 2
+        // 3 4 5 1 2 6
+
+        // Bpos = rank(B): 4 5 1 2 3 6
+        // Bpos[A[i]]    = 3 1 4 2 6 5
+        // merge sort Bpos[A[i]] -> 3,1,4 | 2,6,5 -> 3,1 | 4 | 2,6 | 5 -> 1,3 | 4 | 2,6 | 5 -> 1,3,4 | 2,5,6
+        // swap (3,1) and (6, 5)
+        // final merge: add lhs (1), rhs (2), lhs (3), lhs(4), rhs(6) = two rhs swaps
+        // (3,1), (6,5), (2,1) -> 3
+        if (options.simplifyFractions) {
+            auto dividend_long = std::lround(dividend.GetValue());
+            auto divisor_long = std::lround(divisor.GetValue());
+            if ((std::abs(dividend_long - dividend.GetValue()) <= EPSILON)
+                && (std::abs(divisor_long - divisor.GetValue()) <= EPSILON)) {
+
+                // ex. 6/1 -> 6
+                if (dividend_long % divisor_long == 0) return gsl::not_null { std::make_unique<Real>(dividend_long / divisor_long) };
+
+                auto gcf = std::gcd(dividend_long, divisor_long);
+                if (gcf != 1) {
+                    std::println("dividend now: {}/{}={}, divisor now: {}/{}={}", dividend_long, gcf, dividend_long / gcf, divisor_long, gcf, divisor_long / gcf);
+
+                    // auto d = std::make_unique<Divide<Real>>(Divide { Real { static_cast<double>(dividend_long / gcf) }, Real { static_cast<double>(divisor_long / gcf) } });
+                    // return std::make_unique<Divide>(Divide { Real { static_cast<double>(dividend_long / gcf) }, Real { static_cast<double>(divisor_long / gcf) } });
+                    return gsl::not_null { std::make_unique<Divide<Real>>(Real { static_cast<double>(dividend_long / gcf) }, Real { static_cast<double>(divisor_long / gcf) }) };
+                    // return gsl::not_null { std::make_unique<Real>(static_cast<double>(dividend_long / gcf) + static_cast<double>(divisor_long / gcf) ) };
+                    // return gsl::not_null { (std::move(d)) };
+                    // return gsl::not_null { std::make_unique<Real>(dividend.GetValue() / divisor.GetValue()) };
+                } else {
+                    // ex. 3/1 or 3/3
+                    // also 1/2 should be 0.5, as there is no conversion error.
+                    // if (((std::abs(divisor.GetValue() - 1.0) > EPSILON) && (std::abs(divisor.GetValue() - dividend.GetValue()) > EPSILON))
+                    if (divisor_long != 1 && divisor_long != dividend_long
+                        && !exactly_representable_double(dividend_long, divisor_long)
+                    ) {
+                        // std::println("error here?: {}/{}", dividend.GetValue(), divisor.GetValue());
+                        return gsl::not_null { std::make_unique<Divide<Real>>(dividend, divisor) };
+                    }
+                }
+            } else {
+                std::println("Issue with epsilon: {}/{}", dividend.GetValue(), divisor.GetValue());
+            }
+
+
+
+
+            // return gsl::not_null { d.Copy() };
+            // return gsl::not_null { std::make_unique<Real>(divisor.GetValue() / dividend.GetValue()) };
+        }
         return gsl::not_null { std::make_unique<Real>(dividend.GetValue() / divisor.GetValue()) };
+    }
+
+    if (auto realCase = RecursiveCast<Divide<Divide<Real>>>(simplifiedDivide); realCase != nullptr) {
+        auto reciprocal =  Divide { (realCase->GetLeastSigOp().GetLeastSigOp()), (realCase->GetLeastSigOp().GetMostSigOp()) };
+        auto arg1 = realCase->GetMostSigOp();
+        return gsl::not_null { std::make_unique<Multiply<Divide<Real>>>(arg1, reciprocal) };
     }
 
     // log(a)/log(b)=log[b](a)
@@ -932,12 +1084,46 @@ auto SimplifyVisitor::TypedVisit(const Divide<>& divide) -> RetT
         if (auto real = RecursiveCast<Real>(*denom); real != nullptr) {
             for (; i < result.size(); i++) {
                 if (auto resI = RecursiveCast<Real>(*result[i]); resI != nullptr) {
-                    result[i] = Real { resI->GetValue() / real->GetValue() }.Generalize();
+                    if (options.simplifyFractions) {
+                        auto dividend_long = std::lround(resI->GetValue());
+                        auto divisor_long = std::lround(real->GetValue());
+                        auto gcf = std::gcd(dividend_long, divisor_long);
+                        if ((std::abs(dividend_long - resI->GetValue()) <= EPSILON)
+                            && (std::abs(divisor_long - real->GetValue()) <= EPSILON)
+                            && gcf != 1) {
+
+
+                            std::println("inside for loop: dividend now: {}/{}={}, divisor now: {}/{}={}", dividend_long, gcf, dividend_long / gcf, divisor_long, gcf, divisor_long / gcf);
+
+                            auto d = (Divide { Real { static_cast<double>(dividend_long / gcf) }, Real { static_cast<double>(divisor_long / gcf) } });
+
+                            result[i] = d.Generalize();
+                            } else {
+                                // result[i] = Real { resI->GetValue() / real->GetValue() }.Generalize();
+                                std::println("setting normal divide: {}/{}", resI->GetValue(), real->GetValue());
+                                // result[i] = Divide { *resI, *real }.Generalize();
+                                result[i] = std::make_unique<Divide<Real>>(*resI, *real);
+                            }
+                    } else {
+                        result[i] = Real { resI->GetValue() / real->GetValue() }.Generalize();
+                    }
+
                     break;
                 }
             }
             if (i >= result.size()) {
-                result.push_back(Real { 1 / real->GetValue() }.Generalize());
+                // auto divisor_long = std::lround(real->GetValue());
+                // if (std::abs(divisor_long - real->GetValue()) <= EPSILON) {
+                //     // auto d = (Divide { Real { static_cast<double>(dividend_long / gcf) }, Real { static_cast<double>(divisor_long / gcf) } });
+                //
+                //     result[i] = d.Generalize();
+
+                if (options.simplifyFractions) {
+                    std::println("i >= result.size()");
+                    result.push_back(Divide { Real{1.0}, *real }.Generalize());
+                } else {
+                    result.push_back(Real { 1 / real->GetValue() }.Generalize());
+                }
             }
             continue;
         }
@@ -1181,6 +1367,24 @@ auto SimplifyVisitor::TypedVisit(const Exponent<>& exponent) -> RetT
                                          default:
                                              return std::unexpected { "std::fmod returned an invalid value" };
                                          }
+                                     })
+                                 .Case(
+                                     [](const Exponent<Divide<Real>, Real>&) -> bool {
+                                         return true;
+                                     },
+                                     [](const Exponent<Divide<Real>, Real>& ImgCase, const void*) -> std::expected<gsl::not_null<std::unique_ptr<Expression>>, std::string_view> {
+                                         Divide div {
+                                             Real {
+                                                 pow(ImgCase.GetMostSigOp().GetMostSigOp().GetValue(),
+                                                 ImgCase.GetLeastSigOp().GetValue()),
+                                             },
+                                             Real {
+                                                 pow(ImgCase.GetMostSigOp().GetLeastSigOp().GetValue(),
+                                                 ImgCase.GetLeastSigOp().GetValue())
+                                             }
+                                         };
+
+                                        return gsl::make_not_null(div.Copy());
                                      })
                                  .Case(
                                      [](const Exponent<Multiply<Real, Expression>, Real>& ImgCase) -> bool {
