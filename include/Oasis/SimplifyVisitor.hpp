@@ -20,6 +20,8 @@ struct SimplifyOpts {
     } angleUnits
         = AngleUnits::RADIANS;
 
+    bool simplifyFractions = true;
+
     enum class DistributivePolicy {
         PREFER,
         DEFAULT,
