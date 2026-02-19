@@ -94,6 +94,14 @@ public:
      */
     auto FindZeros() const -> std::vector<std::unique_ptr<Expression>>;
 
+
+    /**
+     * The PartialFractionDecomp function decomposes a rational expressions of polynomials into multiple fractions with a real numerator. Currently assumes an expression with no repeating zeros in the denominator.
+     *
+     * @return A sum of the partial fractions which equals the original expression
+     */
+    [[nodiscard]] auto PartialFractionDecomp() const -> std::unique_ptr<Oasis::Expression>;
+
     /**
      * Gets the category of this expression.
      * @return The category of this expression.
