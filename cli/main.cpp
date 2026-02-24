@@ -502,52 +502,12 @@ auto expand_polynomial3(const std::unique_ptr<Oasis::Expression>& polynom)
 //     return final_pfd_result;
 // }
 
-template <typename T = float>
-std::vector<std::vector<T>> extended_synthetic_division(const std::vector<T>& dividend, const std::vector<T>& divisor)
-{
-    // Fast polynomial division by using Extended Synthetic Division. Also works with non-monic polynomials.
-    // dividend and divisor are both polynomials, which are here simply lists of coefficients. Eg: x^2 + 3x + 5 will be represented as [1, 3, 5]
-
-    auto out = std::vector(dividend); // Copy the dividend
-    // std::println("out: {}", out);
-    auto normalizer = divisor[0];
-    for (int i = 0; i < (dividend.size())-((divisor.size())-1); i++) {
-        out[i] = out[i] / normalizer; // for general polynomial division (when polynomials are non-monic),
-        // we need to normalize by dividing the coefficient with the divisor's first coefficient
-        auto coef = out[i];
-        if (coef != 0) {
-            // useless to multiply if coef is 0
-            for (int j = 1; j < (divisor.size()); j++) {
-                // in synthetic division, we always skip the first coefficient of the divisor,
-                // because it is only used to normalize the dividend coefficients
-                out[i + j] += -divisor[j] * coef;
-            }
-        }
-    }
-
-    // The resulting out contains both the quotient and the remainder, the remainder being the size of the divisor (the remainder
-    // has necessarily the same degree as the divisor since it is what we couldn't divide from the dividend), so we compute the index
-    // where this separation is, and return the quotient and remainder.
-
-    auto res1 = std::vector<T>();
-    auto res2 = std::vector<T>();
-
-    for (int i = 0; i < divisor.size(); i++) {
-        res1.push_back(out[i]);
-    }
-    for (size_t i = divisor.size(); i < out.size(); ++i) {
-        res2.push_back(out[i]);
-    }
-
-    return std::vector {res1, res2};
-}
-
 using std::vector, std::unique_ptr, std::println;
 using namespace Oasis;
 typedef Divide<Real, Real> Fraction;
 typedef unique_ptr<Expression> ExpressionPtr;
 
-vector<vector<unique_ptr<Expression>>> extended_synthetic_division1(vector<ExpressionPtr>& dividend, vector<ExpressionPtr>& divisor)
+vector<vector<unique_ptr<Expression>>> synthetic_divide_list(vector<ExpressionPtr>& dividend, vector<ExpressionPtr>& divisor)
 {
     // Fast polynomial division by using Extended Synthetic Division. Also works with non-monic polynomials.
     // dividend and divisor are both polynomials, which are here simply lists of coefficients. Eg: x^2 + 3x + 5 will be represented as [1, 3, 5]
@@ -608,27 +568,39 @@ vector<Expression> all_coeffs_2(ExpressionPtr& exp)
     }
 } */
 
-vector<vector<unique_ptr<Expression>>> synthetic_divide(ExpressionPtr& dividend, ExpressionPtr& divisor)
+// ex. if given [2, 5, -3, 6], return 2x^3+5x^2-3x+6
+auto coeffs_to_polynomial(std::vector<ExpressionPtr>& coeffs)
+{
+    auto x = Oasis::Variable {"x"};
+    std::vector<ExpressionPtr> terms;
+    for (size_t i = 0; i < coeffs.size(); i++) {
+        terms.emplace_back(coeffs[i] * (Exponent{x, Real{static_cast<double>(coeffs.size() - 1 - i)}}).Copy());
+    }
+    return Oasis::BuildFromVector<Add>(terms);
+}
+
+std::pair<unique_ptr<Expression>, unique_ptr<Expression>> synthetic_divide(ExpressionPtr& dividend, ExpressionPtr& divisor)
 {
     SimplifyVisitor simplify_visitor {};
     InFixSerializer serializer;
     auto dividend_coeffs = all_coeffs(expand_polynomial3(dividend)->Accept(simplify_visitor).value());
     auto divisor_coeffs = all_coeffs(expand_polynomial3(divisor)->Accept(simplify_visitor).value());
 
-    auto res = extended_synthetic_division1(dividend_coeffs, divisor_coeffs);
-    for (const auto& d : res) {
-        for (const auto& e : d) {
-            std::print("synthetic divide vector value: {}", e->Accept(serializer).value());
-        }
-        std::println("\n\n");
-    }
+    auto old_result = synthetic_divide_list(dividend_coeffs, divisor_coeffs);
 
-    return vector<vector<ExpressionPtr>>();
+    unique_ptr<Expression> new_result_quotient = coeffs_to_polynomial(old_result[0]);
+    unique_ptr<Expression> new_result_remainder = coeffs_to_polynomial(old_result[1]);
+    auto result = std::make_pair<ExpressionPtr, ExpressionPtr>(std::move(new_result_quotient), std::move(new_result_remainder));
+    return result;
 }
 
-auto poly_gcd(vector<ExpressionPtr>& a, vector<ExpressionPtr>& b) -> vector<unique_ptr<Expression>>
+auto poly_gcd_list(vector<ExpressionPtr>& a, vector<ExpressionPtr>& b) -> vector<unique_ptr<Expression>>
 {
-    auto res = extended_synthetic_division1(a, b);
+    if (b.size() == 1 && b[0]->Is<Real>() && RecursiveCast<Real>(*b[0])->GetValue() == 0) {
+        return std::move(a);
+    }
+
+    auto res = synthetic_divide_list(a, b);
     if (res[1].size() == 1 && res[1][0]->Is<Real>() && RecursiveCast<Real>(*(res[1].front()))->GetValue() == 0) {
         std::println("Base case reached! Terminating!");
         // Scale the resulting expression by the leading coefficient
@@ -637,7 +609,48 @@ auto poly_gcd(vector<ExpressionPtr>& a, vector<ExpressionPtr>& b) -> vector<uniq
             b_element = b_element / lc;
         return std::move(b);
     }
-    return std::move(poly_gcd(b, res[1]));
+    return std::move(poly_gcd_list(b, res[1]));
+}
+
+auto poly_gcd(ExpressionPtr& a, ExpressionPtr& b) -> ExpressionPtr
+{
+    if (b->Is<Real>() && RecursiveCast<Real>(*b)->GetValue() == 0) {
+        return std::move(a);
+    }
+
+    auto res = synthetic_divide_list(a, b);
+    if (res[1].size() == 1 && res[1][0]->Is<Real>() && RecursiveCast<Real>(*(res[1].front()))->GetValue() == 0) {
+        std::println("Base case reached! Terminating!");
+        // Scale the resulting expression by the leading coefficient
+        auto lc = b[0]->Copy();
+        for (auto& b_element : b)
+            b_element = b_element / lc;
+        return std::move(b);
+    }
+    return std::move(poly_gcd_list(b, res[1]));
+}
+
+
+
+auto yuns(ExpressionPtr& f)
+{
+    SimplifyVisitor simplify_visitor {};
+    auto x = Oasis::Variable{"x"};
+    auto f_diff = f->Differentiate(x);
+
+    auto expanded_coeffs_f = all_coeffs(expand_polynomial3(f)->Accept(simplify_visitor).value());
+    auto expanded_coeffs_fdiff = all_coeffs(expand_polynomial3(f_diff)->Accept(simplify_visitor).value());
+
+    auto a0 = poly_gcd_list(expanded_coeffs_f, expanded_coeffs_fdiff);
+    auto b1_division_results = synthetic_divide_list(expanded_coeffs_f, a0);
+    auto b1 = std::move(b1_division_results.front());
+    // recombine the coefficients to make an expression
+    auto combined_b1 = coeffs_to_polynomial(b1)->Generalize();
+
+    auto c1_division_results = synthetic_divide_list(expanded_coeffs_fdiff, a0);
+    auto c1 = std::move(c1_division_results.front());
+    auto combined_c1 = coeffs_to_polynom
+    auto d1 = c1 + combined_b1->Differentiate(x);
 }
 
 
@@ -764,7 +777,7 @@ int main(int argc, char** argv)
     arg2.emplace_back(std::make_unique<Real>(arg21));
     arg2.emplace_back(std::make_unique<Real>(arg22));
 
-    auto re = extended_synthetic_division1(arg1, arg2);
+    auto re = synthetic_divide_list(arg1, arg2);
     for (const auto& expr : re[0]) {
         std::print("expr: {}, ", expr->Accept(simplify_visitor).value()->Accept(serializer).value());
     }
@@ -784,12 +797,16 @@ int main(int argc, char** argv)
     vp.emplace_back(Real{7}.Copy());
     vp.emplace_back(Real{-3}.Copy());
 
+    auto res_polynom = coeffs_to_polynomial(vp);
+    std::println("res polynom: {}", res_polynom->Accept(serializer).value());
+
+
     vector<ExpressionPtr> vp2;
     vp2.emplace_back(Real{1}.Copy());
     vp2.emplace_back(Real{-2}.Copy());
     vp2.emplace_back(Real{-3}.Copy());
 
-    auto gcds = poly_gcd(vp, vp2);
+    auto gcds = poly_gcd_list(vp, vp2);
     std::println("GCD vector size: {} means the degree is {}", gcds.size(), gcds.size() - 1);
     std::println("GCD Terms:");
     for (const auto& term : gcds) {
