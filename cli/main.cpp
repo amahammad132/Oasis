@@ -502,52 +502,36 @@ auto expand_polynomial3(const std::unique_ptr<Oasis::Expression>& polynom)
 //     return final_pfd_result;
 // }
 
-template <typename T = float>
-std::vector<std::vector<T>> extended_synthetic_division(const std::vector<T>& dividend, const std::vector<T>& divisor)
-{
-    // Fast polynomial division by using Extended Synthetic Division. Also works with non-monic polynomials.
-    // dividend and divisor are both polynomials, which are here simply lists of coefficients. Eg: x^2 + 3x + 5 will be represented as [1, 3, 5]
-
-    auto out = std::vector(dividend); // Copy the dividend
-    // std::println("out: {}", out);
-    auto normalizer = divisor[0];
-    for (int i = 0; i < (dividend.size())-((divisor.size())-1); i++) {
-        out[i] = out[i] / normalizer; // for general polynomial division (when polynomials are non-monic),
-        // we need to normalize by dividing the coefficient with the divisor's first coefficient
-        auto coef = out[i];
-        if (coef != 0) {
-            // useless to multiply if coef is 0
-            for (int j = 1; j < (divisor.size()); j++) {
-                // in synthetic division, we always skip the first coefficient of the divisor,
-                // because it is only used to normalize the dividend coefficients
-                out[i + j] += -divisor[j] * coef;
-            }
-        }
-    }
-
-    // The resulting out contains both the quotient and the remainder, the remainder being the size of the divisor (the remainder
-    // has necessarily the same degree as the divisor since it is what we couldn't divide from the dividend), so we compute the index
-    // where this separation is, and return the quotient and remainder.
-
-    auto res1 = std::vector<T>();
-    auto res2 = std::vector<T>();
-
-    for (int i = 0; i < divisor.size(); i++) {
-        res1.push_back(out[i]);
-    }
-    for (size_t i = divisor.size(); i < out.size(); ++i) {
-        res2.push_back(out[i]);
-    }
-
-    return std::vector {res1, res2};
-}
-
 using std::vector, std::unique_ptr, std::println;
 using namespace Oasis;
 typedef Divide<Real, Real> Fraction;
 typedef unique_ptr<Expression> ExpressionPtr;
 
-vector<vector<unique_ptr<Expression>>> extended_synthetic_division1(vector<ExpressionPtr>& dividend, vector<ExpressionPtr>& divisor)
+void print_pair(const std::pair<ExpressionPtr, ExpressionPtr>& pair)
+{
+    Oasis::InFixSerializer serializer;
+    auto& it1 = pair.first;
+    auto& it2 = pair.second;
+    std::println("quotient: {}, remainder: {}", it1->Accept(serializer).value(), it2->Accept(serializer).value());
+}
+
+void print_pair(const std::pair<vector<ExpressionPtr>, vector<ExpressionPtr>>& pair)
+{
+    Oasis::InFixSerializer serializer;
+    auto& it1 = pair.first;
+    auto& it2 = pair.second;
+    std::print("quotient: ");
+    for (auto& itm : it1) {
+        std::print("{} ", itm->Accept(serializer).value());
+    }
+    std::print(", remainder: ");
+    for (auto& itm : it2) {
+        std::print("{} ", itm->Accept(serializer).value());
+    }
+    std::println();
+}
+
+std::pair<vector<unique_ptr<Expression>>, vector<unique_ptr<Expression>>> synthetic_divide_list(vector<ExpressionPtr>& dividend, vector<ExpressionPtr>& divisor)
 {
     // Fast polynomial division by using Extended Synthetic Division. Also works with non-monic polynomials.
     // dividend and divisor are both polynomials, which are here simply lists of coefficients. Eg: x^2 + 3x + 5 will be represented as [1, 3, 5]
@@ -579,57 +563,96 @@ vector<vector<unique_ptr<Expression>>> extended_synthetic_division1(vector<Expre
     // has necessarily the same degree as the divisor since it is what we couldn't divide from the dividend), so we compute the index
     // where this separation is, and return the quotient and remainder.
 
-    auto quotient = std::vector<ExpressionPtr>();
-    auto remainder = std::vector<ExpressionPtr>();
+    std::vector<ExpressionPtr> quotient {};
+    std::vector<ExpressionPtr> remainder {};
 
-    for (int i = 0; i < divisor.size(); i++) {
+    int sep = out.size() - (divisor.size() - 1);
+    for (int i = 0; i < sep; i++) {
         quotient.emplace_back(out[i]->Accept(simplify_visitor).value());
+        // auto out_i_copy = out[i]->Copy();
+        // auto tmp1 = out_i_copy->Accept(simplify_visitor).value();
+        // quotient.emplace_back(tmp1.get());
+        // std::println("adding a quotient.");
     }
-    for (size_t i = divisor.size(); i < out.size(); ++i) {
+    for (int i = sep; i < out.size(); ++i) {
         remainder.emplace_back(out[i]->Accept(simplify_visitor).value());
+        // auto tmp1 = out[i]->Accept(simplify_visitor).value();
+        // remainder.emplace_back(tmp1.get());
+        // std::println("adding a remainder.");
     }
+    std::println("done adding items: {}, {}", quotient.size(), remainder.size());
 
-    auto res3 = std::vector<std::vector<ExpressionPtr>>();
-    res3.emplace_back(std::move(quotient));
-    res3.emplace_back(std::move(remainder));
-    return std::move(res3);
+    // auto res3 = std::vector<std::vector<ExpressionPtr>>();
+    // res3.emplace_back(std::move(quotient));
+    // res3.emplace_back(std::move(remainder));
+    // return std::move(res3);
+
+    return std::make_pair<vector<ExpressionPtr>, vector<ExpressionPtr>>(std::move(quotient), std::move(remainder));
 }
 
-/*
-vector<Expression> all_coeffs_2(ExpressionPtr& exp)
+// ex. if given [2, 5, -3, 6], return 2x^3+5x^2-3x+6
+auto coeffs_to_polynomial(const std::vector<ExpressionPtr>& coeffs) -> unique_ptr<Expression>
 {
-    auto term_list = vector<ExpressionPtr>();
+    // base case (input: [], output: 0)
+    if (coeffs.empty()) return Real{0}.Copy();
 
-    if (exp->Is<Add>()) {
-        auto casted = RecursiveCast<Add<Expression>>(*exp);
-        casted->Flatten(term_list);
-
-        auto c3 = RecursiveCast<Multiply<Expression, Exponent<Variable, Real>>>(*casted);
+    auto x = Oasis::Variable {"x"};
+    std::vector<ExpressionPtr> terms;
+    for (size_t i = 0; i < coeffs.size(); i++) {
+        terms.emplace_back(coeffs[i] * (Exponent{x, Real{static_cast<double>(coeffs.size() - 1 - i)}}).Copy());
     }
-} */
+    return Oasis::BuildFromVector<Add>(terms);
+}
 
-vector<vector<unique_ptr<Expression>>> synthetic_divide(ExpressionPtr& dividend, ExpressionPtr& divisor)
+std::pair<unique_ptr<Expression>, unique_ptr<Expression>> synthetic_divide(ExpressionPtr& dividend, ExpressionPtr& divisor)
 {
     SimplifyVisitor simplify_visitor {};
     InFixSerializer serializer;
     auto dividend_coeffs = all_coeffs(expand_polynomial3(dividend)->Accept(simplify_visitor).value());
     auto divisor_coeffs = all_coeffs(expand_polynomial3(divisor)->Accept(simplify_visitor).value());
 
-    auto res = extended_synthetic_division1(dividend_coeffs, divisor_coeffs);
-    for (const auto& d : res) {
-        for (const auto& e : d) {
-            std::print("synthetic divide vector value: {}", e->Accept(serializer).value());
-        }
-        std::println("\n\n");
-    }
+    std::println("number of dividend coeffs: {}", dividend_coeffs.size());
+    std::println("number of divisor coeffs: {}", divisor_coeffs.size());
 
-    return vector<vector<ExpressionPtr>>();
+    std::print("dividend coeffs: ");
+    for (auto& coeff : dividend_coeffs) {
+        std::print("{} ", coeff->Accept(serializer).value());
+    }
+    std::println();
+    std::print("divisor coeffs: ");
+    for (auto& coeff : divisor_coeffs) {
+        std::print("{} ", coeff->Accept(serializer).value());
+    }
+    std::println();
+    auto old_result = synthetic_divide_list(dividend_coeffs, divisor_coeffs);
+    std::println("running print_pair(old_result)");
+    print_pair(old_result);
+    // std::println("old result.first size: {}, old result.second size: {}", old_result.first.size(), old_result.second.size());
+
+    // vector<ExpressionPtr> first_polynom_coeffs;
+    // for (auto& itm : old_result.first) {
+    //     first_polynom_coeffs.emplace_back(itm->Copy());
+    // }
+    // std::println("copy complete");
+
+    unique_ptr<Expression> new_result_quotient = coeffs_to_polynomial(old_result.first);
+    std::println("new result quotient: {}", new_result_quotient->Accept(serializer).value());
+    unique_ptr<Expression> new_result_remainder = coeffs_to_polynomial(old_result.second);
+    // unique_ptr<Expression> new_result_remainder = new_result_quotient->Copy();
+    // std::println("size(new_result_quotient) = {}, size(new_result_remainder) = {}", ne)
+    // std::println("new result remainder: {}", new_result_remainder->Accept(serializer).value());
+    return std::make_pair<ExpressionPtr, ExpressionPtr>(new_result_quotient->Copy(), new_result_remainder->Copy());
+    // return std::make_pair(coeffs_to_polynomial(old_result.first), coeffs_to_polynomial(old_result.second));
 }
 
-auto poly_gcd(vector<ExpressionPtr>& a, vector<ExpressionPtr>& b) -> vector<unique_ptr<Expression>>
+auto poly_gcd_list(vector<ExpressionPtr>& a, vector<ExpressionPtr>& b) -> vector<unique_ptr<Expression>>
 {
-    auto res = extended_synthetic_division1(a, b);
-    if (res[1].size() == 1 && res[1][0]->Is<Real>() && RecursiveCast<Real>(*(res[1].front()))->GetValue() == 0) {
+    if (b.size() == 1 && b[0]->Is<Real>() && RecursiveCast<Real>(*b[0])->GetValue() == 0) {
+        return std::move(a);
+    }
+
+    auto res = synthetic_divide_list(a, b);
+    if (res.second.size() == 1 && res.second[0]->Is<Real>() && RecursiveCast<Real>(*(res.second.front()))->GetValue() == 0) {
         std::println("Base case reached! Terminating!");
         // Scale the resulting expression by the leading coefficient
         auto lc = b[0]->Copy();
@@ -637,8 +660,87 @@ auto poly_gcd(vector<ExpressionPtr>& a, vector<ExpressionPtr>& b) -> vector<uniq
             b_element = b_element / lc;
         return std::move(b);
     }
-    return std::move(poly_gcd(b, res[1]));
+    return std::move(poly_gcd_list(b, res.second));
 }
+
+auto poly_gcd(ExpressionPtr& a, ExpressionPtr& b) -> ExpressionPtr
+{
+    std::println("another poly_gcd iteration!");
+    if (b->Is<Real>() && RecursiveCast<Real>(*b)->GetValue() == 0) {
+        // return std::move(a);
+        return a->Copy();
+    }
+
+    InFixSerializer serializer {};
+    std::println("a = {}, b = {}", a->Accept(serializer).value(), b->Accept(serializer).value());
+    auto res = synthetic_divide(a, b);
+    std::println("res.first: {}, res.second: {}", res.first->Accept(serializer).value(), res.second->Accept(serializer).value());
+    if (res.second->Is<Real>() && RecursiveCast<Real>(*(res.second))->GetValue() == 0) {
+        std::println("Base case reached! Terminating!");
+        // Scale the resulting expression by the leading coefficient
+        // auto coeffs = all_coeffs(b->Copy());
+        // std::vector<ExpressionPtr> scaled_coeffs;
+        // for (const auto& coeff : coeffs) {
+        //     scaled_coeffs.emplace_back((coeff / coeffs[0])->Simplify());
+        // }
+        // auto monic_b = coeffs_to_polynomial(scaled_coeffs);
+        // return std::move(b);
+        return b->Copy();
+    }
+    // return std::move(poly_gcd(b, res.second));
+    return poly_gcd(b, res.second);
+}
+
+
+
+// auto yuns(ExpressionPtr& f)
+// {
+//     SimplifyVisitor simplify_visitor {};
+//     auto x = Oasis::Variable{"x"};
+//     auto f_diff = f->Differentiate(x);
+//
+//     auto expanded_coeffs_f = all_coeffs(expand_polynomial3(f)->Accept(simplify_visitor).value());
+//     auto expanded_coeffs_fdiff = all_coeffs(expand_polynomial3(f_diff)->Accept(simplify_visitor).value());
+//
+//     auto a0 = poly_gcd_list(expanded_coeffs_f, expanded_coeffs_fdiff);
+//     auto b1_division_results = synthetic_divide_list(expanded_coeffs_f, a0);
+//     auto b1 = std::move(b1_division_results.front());
+//     // recombine the coefficients to make an expression
+//     auto combined_b1 = coeffs_to_polynomial(b1)->Generalize();
+//
+//     auto c1_division_results = synthetic_divide_list(expanded_coeffs_fdiff, a0);
+//     auto c1 = std::move(c1_division_results.front());
+//     auto combined_c1 = coeffs_to_polynom
+//     auto d1 = c1 + combined_b1->Differentiate(x);
+// }
+
+auto yuns(ExpressionPtr& f)
+{
+    SimplifyVisitor simplify_visitor {};
+    auto x = Oasis::Variable{"x"};
+    auto f_diff = f->Differentiate(x);
+
+    auto a0 = poly_gcd(f, f_diff);
+    auto b1 = synthetic_divide(f, a0).first;
+    auto c1 = synthetic_divide(f_diff, a0).first;
+    auto d1 = c1 - b1->Differentiate(x);
+
+    int i = 1;
+    std::list<ExpressionPtr> a, b, c, d;
+    a.emplace_back(std::move(a0));
+    b.emplace_back(std::move(b1));
+    b.emplace_back(std::move(b1));
+    c.emplace_back(std::move(c1));
+    c.emplace_back(std::move(c1));
+    d.emplace_back(std::move(d1));
+    d.emplace_back(std::move(d1));
+
+
+}
+
+
+
+
 
 
 int main(int argc, char** argv)
@@ -657,145 +759,183 @@ int main(int argc, char** argv)
     Oasis::Variable x {"x"};
     // auto numerator = Subtract(Multiply(x, Real{2}), Real{-1});
 
-    auto repeated_zero_quadratic = Add(Real{16}, Add(Multiply(Real{20}, x), Add(Multiply(Real{8}, Multiply(x, x)), Multiply(Multiply(x, x), x))));
-    auto repeated_zero_quad_simpl = repeated_zero_quadratic.Accept(simplify_visitor).value();
-    std::println("complete quadratic: {}", repeated_zero_quad_simpl->Accept(serializer).value());
-    auto repeated_zero_quad_zeroes = repeated_zero_quad_simpl->FindZeros();
-    for (auto& zer : repeated_zero_quad_zeroes) {
-        std::println("repeated zero?: {}\n\n\n", zer->Accept(serializer).value());
-    }
-
-
-    // example to show matthew on why simplify is broken
-
-    // auto simpleFrac = Add { Real{2}, Real{3} };
-    // auto simpleFrac = Add { Divide { Real{4}, Real{9}}, Real{4}};
-    // auto simpleFrac = Exponent { Divide{Real{2}, Real{3}}, Real{2} };
-    // auto simpleFrac = Divide { Divide{Real{40}, Real{9}}, Divide{Real{16}, Real{3}}};
-    auto simpleFrac = Multiply { Divide{Real{40}, Real{9}}, Divide{Real{3}, Real{16}}};
-    // auto simpleFrac = Divide {
-    //     Subtract {
-    //         Real{-4},
-    //         Exponent{
-    //             Real{64},
-    //             Divide {
-    //                 Real{1},
-    //                 Real{2}
-    //             }
-    //         }
-    //     },
-    //     Real{6}
-    // };
-    // auto simpleFrac = Add { Divide { Real{4}, Real{9}}, Real{4}};
-    // auto simpleFrac = Multiply { Real{2}, Add{ x, Real{3}}};
-    auto flattened = std::vector<std::unique_ptr<Expression>>();
-    simpleFrac.Flatten(flattened);
-    auto simplifiedFrac = std::move(simpleFrac.Accept(simplify_visitor)).value();
-    // auto simplifiedFrac = simpleFrac2.Generalize();
-    auto simplifiedFracStr = simplifiedFrac->Accept(serializer);
-    std::println("Simplified fraction: {}", simplifiedFracStr.value());
-    for (auto& itm : flattened) {
-        std::println("itm (part of simpleFrac): {}", itm->Accept(serializer).value());
-    }
-
-
-    // cubic polynomial
-    // a_1 * x^3 + a_2 * x^2 + a_3 * x + a_4
-    // std::unique_ptr<Expression> a1 = std::make_unique<Real>(3);
-    // std::unique_ptr<Expression> a2 = std::make_unique<Real>(4);
-    // std::unique_ptr<Expression> a3 = std::make_unique<Real>(-4);
-    // std::unique_ptr<Expression> a4 = std::make_unique<Real>(0);
-    // std::unique_ptr<Expression> x1 = std::make_unique<Variable>(x);
-    // auto denominator2 =  a1*x1*x1*x1 + a2*x1*x1 + a3*x1 + a4;
-    // auto denominator2 =  a4 + a3*x1 + a2*x1*x1 + a1*x1*x1*x1;
-
-
-
-    // (3x+11)/(x^2-x-6)
-    auto numerator1 = Add(Multiply(x, Real{3}), Real{11});
-
-
-    // TODO: Fix coeffs() function for this case (Subtract and Add)
-    // auto denominator1 = Subtract { Multiply {x, x}, Add { x, Real{6}} };
-
-    auto denominator1 = Add { Multiply {x, x}, Add { Multiply {Real{-1}, x}, Real{-6}} };
-    auto exp1 = Divide{ numerator1, denominator1 };
-    std::println("exp1: {}", exp1.Accept(serializer).value());
-
-    // (x^2+4)/x(3x^2+4x-4)
-    auto numerator2 = Add { Multiply { x, x }, Real { 4 } };
-    // denominator is of the form ax^2+bx+c
-    double a = 3, b = 4, c = -4;
-    auto denominator2 = Multiply {x, Add(Real{c}, Add(Multiply(Real{b}, x), Multiply(Real{a}, Multiply(x, x))))};
-    // auto denominator2 = Multiply {x, denominator};
-    auto exp2 = Divide{ numerator2, denominator2 };
-
-    // vector<ExpressionPtr> coeffs = all_coeffs(expand_polynomial3(denominator1.Copy())->Accept(simplify_visitor).value());
-    // for (const auto& coeff : coeffs) {
-    //     std::println("coeff: {}", coeff->Accept(serializer).value());
+    // BELOW WORKS
+    // auto repeated_zero_quadratic = Add(Real{16}, Add(Multiply(Real{20}, x), Add(Multiply(Real{8}, Multiply(x, x)), Multiply(Multiply(x, x), x))));
+    // auto repeated_zero_quad_simpl = repeated_zero_quadratic.Accept(simplify_visitor).value();
+    // std::println("complete quadratic: {}", repeated_zero_quad_simpl->Accept(serializer).value());
+    // auto repeated_zero_quad_zeroes = repeated_zero_quad_simpl->FindZeros();
+    // for (auto& zer : repeated_zero_quad_zeroes) {
+    //     std::println("repeated zero?: {}\n\n\n", zer->Accept(serializer).value());
     // }
+    //
+    //
+    // // example to show matthew on why simplify is broken
+    //
+    // // auto simpleFrac = Add { Real{2}, Real{3} };
+    // // auto simpleFrac = Add { Divide { Real{4}, Real{9}}, Real{4}};
+    // // auto simpleFrac = Exponent { Divide{Real{2}, Real{3}}, Real{2} };
+    // // auto simpleFrac = Divide { Divide{Real{40}, Real{9}}, Divide{Real{16}, Real{3}}};
+    // auto simpleFrac = Multiply { Divide{Real{40}, Real{9}}, Divide{Real{3}, Real{16}}};
+    // // auto simpleFrac = Divide {
+    // //     Subtract {
+    // //         Real{-4},
+    // //         Exponent{
+    // //             Real{64},
+    // //             Divide {
+    // //                 Real{1},
+    // //                 Real{2}
+    // //             }
+    // //         }
+    // //     },
+    // //     Real{6}
+    // // };
+    // // auto simpleFrac = Add { Divide { Real{4}, Real{9}}, Real{4}};
+    // // auto simpleFrac = Multiply { Real{2}, Add{ x, Real{3}}};
+    // auto flattened = std::vector<std::unique_ptr<Expression>>();
+    // simpleFrac.Flatten(flattened);
+    // auto simplifiedFrac = std::move(simpleFrac.Accept(simplify_visitor)).value();
+    // // auto simplifiedFrac = simpleFrac2.Generalize();
+    // auto simplifiedFracStr = simplifiedFrac->Accept(serializer);
+    // std::println("Simplified fraction: {}", simplifiedFracStr.value());
+    // for (auto& itm : flattened) {
+    //     std::println("itm (part of simpleFrac): {}", itm->Accept(serializer).value());
+    // }
+    //
+    //
+    // // cubic polynomial
+    // // a_1 * x^3 + a_2 * x^2 + a_3 * x + a_4
+    // // std::unique_ptr<Expression> a1 = std::make_unique<Real>(3);
+    // // std::unique_ptr<Expression> a2 = std::make_unique<Real>(4);
+    // // std::unique_ptr<Expression> a3 = std::make_unique<Real>(-4);
+    // // std::unique_ptr<Expression> a4 = std::make_unique<Real>(0);
+    // // std::unique_ptr<Expression> x1 = std::make_unique<Variable>(x);
+    // // auto denominator2 =  a1*x1*x1*x1 + a2*x1*x1 + a3*x1 + a4;
+    // // auto denominator2 =  a4 + a3*x1 + a2*x1*x1 + a1*x1*x1*x1;
+    //
+    //
+    //
+    // // (3x+11)/(x^2-x-6)
+    // auto numerator1 = Add(Multiply(x, Real{3}), Real{11});
+    //
+    //
+    // // TODO: Fix coeffs() function for this case (Subtract and Add)
+    // // auto denominator1 = Subtract { Multiply {x, x}, Add { x, Real{6}} };
+    //
+    // auto denominator1 = Add { Multiply {x, x}, Add { Multiply {Real{-1}, x}, Real{-6}} };
+    // auto exp1 = Divide{ numerator1, denominator1 };
+    // std::println("exp1: {}", exp1.Accept(serializer).value());
+    //
+    // // (x^2+4)/x(3x^2+4x-4)
+    // auto numerator2 = Add { Multiply { x, x }, Real { 4 } };
+    // // denominator is of the form ax^2+bx+c
+    // double a = 3, b = 4, c = -4;
+    // auto denominator2 = Multiply {x, Add(Real{c}, Add(Multiply(Real{b}, x), Multiply(Real{a}, Multiply(x, x))))};
+    // // auto denominator2 = Multiply {x, denominator};
+    // auto exp2 = Divide{ numerator2, denominator2 };
+    //
+    // // vector<ExpressionPtr> coeffs = all_coeffs(expand_polynomial3(denominator1.Copy())->Accept(simplify_visitor).value());
+    // // for (const auto& coeff : coeffs) {
+    // //     std::println("coeff: {}", coeff->Accept(serializer).value());
+    // // }
+    //
+    // auto cop1 = denominator1.Copy();
+    // auto cop2 = numerator1.Copy();
+    // auto sres = synthetic_divide(cop1, cop2);
+    //
+    //
+    //
+    // // auto res = pfd(numerator1.Generalize(), denominator1.Generalize());
+    // // auto res = exp2.PartialFractionDecomp();
+    //
+    // // auto arg1 = std::vector<float> {1, 5, 6};
+    // // auto arg2 = std::vector<float> {1, -1};
+    //
+    //
+    //
+    // // Synthetic Division Test
+    // auto arg11 = Real{1};
+    // auto arg12 = Real{-2};
+    // auto arg13 = Real{-3};
+    // auto arg1 = std::vector<std::unique_ptr<Expression>>();
+    // arg1.emplace_back(std::make_unique<Real>(arg11));
+    // arg1.emplace_back(std::make_unique<Real>(arg12));
+    // arg1.emplace_back(std::make_unique<Real>(arg13));
+    //
+    // auto arg21 = Real{3};
+    // auto arg22 = Real{-7};
+    // auto arg2 = std::vector<std::unique_ptr<Expression>>();
+    // arg2.emplace_back(std::make_unique<Real>(arg21));
+    // arg2.emplace_back(std::make_unique<Real>(arg22));
+    //
+    // auto re = synthetic_divide_list(arg1, arg2);
+    // for (const auto& expr : re.first) {
+    //     std::print("expr: {}, ", expr->Accept(simplify_visitor).value()->Accept(serializer).value());
+    // }
+    // std::println();
+    // for (const auto& expr : re.first) {
+    //     std::print("expr: {}, ", expr->Accept(serializer).value());
+    // }
+    //
+    //
+    //
+    //
+    // // Polynomial GCD Test
+    // vector<ExpressionPtr> vp;
+    // vp.emplace_back(Real{1}.Copy());
+    // vp.emplace_back(Real{-3}.Copy());
+    // vp.emplace_back(Real{-2}.Copy());
+    // vp.emplace_back(Real{7}.Copy());
+    // vp.emplace_back(Real{-3}.Copy());
+    //
+    // auto vp_combined = coeffs_to_polynomial(vp)->Copy();
+    // std::println("res polynom: {}", vp_combined->Accept(serializer).value());
+    //
+    //
+    // vector<ExpressionPtr> vp2;
+    // vp2.emplace_back(Real{1}.Copy());
+    // vp2.emplace_back(Real{-2}.Copy());
+    // vp2.emplace_back(Real{-3}.Copy());
+    // auto vp2_combined = coeffs_to_polynomial(vp2)->Copy();
 
-    auto cop1 = denominator1.Copy();
-    auto cop2 = numerator1.Copy();
-    auto sres = synthetic_divide(cop1, cop2);
+    // auto gcds = poly_gcd_list(vp, vp2);
+    // std::println("GCD vector size: {} means the degree is {}", gcds.size(), gcds.size() - 1);
+    // std::println("GCD Terms:");
+    // for (const auto& term : gcds) {
+    //     std::print("{} ", term->Accept(serializer).value());
+    // }
+    // std::println();
+
+    // auto divided = synthetic_divide(vp_combined, vp2_combined);
+    // auto divided = synthetic_divide_list(vp, vp2);
+    // print_pair(divided);
+    // ABOVE WORKS
+
+    // auto gcd_using_poly_gcd = poly_gcd(vp_combined, vp2_combined);
+    // std::println("gcd using poly gcd: {}", gcd_using_poly_gcd->Accept(serializer).value());
+
+    // auto x_expr = x.Copy();
+    // auto vp3 = (x_expr * x_expr) + (Real{-1}.Copy() * x_expr) + Real{-6}.Copy();
+    // auto vp4 = (Real{3}.Copy() * x_expr) + Real{11}.Copy();
+
+    vector<ExpressionPtr> vp3;
+    vp3.emplace_back(Real{1}.Copy());
+    vp3.emplace_back(Real{-1}.Copy());
+    vp3.emplace_back(Real{-6}.Copy());
+
+    auto vp3_combined = coeffs_to_polynomial(vp3)->Copy();
+    std::println("res polynom: {}", vp3_combined->Accept(serializer).value());
+
+
+    vector<ExpressionPtr> vp4;
+    vp4.emplace_back(Real{3}.Copy());
+    vp4.emplace_back(Real{11}.Copy());
+    auto vp4_combined = coeffs_to_polynomial(vp4)->Copy();
+
+    auto synthetic_res = synthetic_divide(vp4_combined, vp3_combined);
+    print_pair(synthetic_res);
 
 
 
-    // auto res = pfd(numerator1.Generalize(), denominator1.Generalize());
-    // auto res = exp2.PartialFractionDecomp();
-
-    // auto arg1 = std::vector<float> {1, 5, 6};
-    // auto arg2 = std::vector<float> {1, -1};
-
-
-
-    // Synthetic Division Test
-    auto arg11 = Real{1};
-    auto arg12 = Real{-2};
-    auto arg13 = Real{-3};
-    auto arg1 = std::vector<std::unique_ptr<Expression>>();
-    arg1.emplace_back(std::make_unique<Real>(arg11));
-    arg1.emplace_back(std::make_unique<Real>(arg12));
-    arg1.emplace_back(std::make_unique<Real>(arg13));
-
-    auto arg21 = Real{3};
-    auto arg22 = Real{-7};
-    auto arg2 = std::vector<std::unique_ptr<Expression>>();
-    arg2.emplace_back(std::make_unique<Real>(arg21));
-    arg2.emplace_back(std::make_unique<Real>(arg22));
-
-    auto re = extended_synthetic_division1(arg1, arg2);
-    for (const auto& expr : re[0]) {
-        std::print("expr: {}, ", expr->Accept(simplify_visitor).value()->Accept(serializer).value());
-    }
-    std::println();
-    for (const auto& expr : re[1]) {
-        std::print("expr: {}, ", expr->Accept(serializer).value());
-    }
-
-
-
-
-    // Polynomial GCD Test
-    vector<ExpressionPtr> vp;
-    vp.emplace_back(Real{1}.Copy());
-    vp.emplace_back(Real{-3}.Copy());
-    vp.emplace_back(Real{-2}.Copy());
-    vp.emplace_back(Real{7}.Copy());
-    vp.emplace_back(Real{-3}.Copy());
-
-    vector<ExpressionPtr> vp2;
-    vp2.emplace_back(Real{1}.Copy());
-    vp2.emplace_back(Real{-2}.Copy());
-    vp2.emplace_back(Real{-3}.Copy());
-
-    auto gcds = poly_gcd(vp, vp2);
-    std::println("GCD vector size: {} means the degree is {}", gcds.size(), gcds.size() - 1);
-    std::println("GCD Terms:");
-    for (const auto& term : gcds) {
-        std::print("{} ", term->Accept(serializer).value());
-    }
-    std::println();
 
 
     return EXIT_SUCCESS;
