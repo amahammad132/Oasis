@@ -166,7 +166,7 @@ auto expand_polynomial(const std::unique_ptr<Oasis::Expression>& polynom)
             }
 
 
-            std::println("lhs # of items added: {}, rhs # of items added: {}", lhs.size(), rhs.size());
+            // std::println("lhs # of items added: {}, rhs # of items added: {}", lhs.size(), rhs.size());
             std::vector<std::unique_ptr<Expression>> result;
             for (const auto& lhs_exp : lhs) {
                 for (const auto& rhs_exp : rhs) {
@@ -301,7 +301,6 @@ auto pfd_static(std::unique_ptr<Oasis::Expression> numerator, std::unique_ptr<Oa
 
 
     std::map<Variable, Divide<Real>> coefs;
-#define print_expr(expr) std::println(#expr ": {}", expr->Accept(serializer).value())
 
 
 
@@ -313,14 +312,14 @@ auto pfd_static(std::unique_ptr<Oasis::Expression> numerator, std::unique_ptr<Oa
     std::vector<std::unique_ptr<Expression>> final_pfd;
     int i = 0;
     for (auto& zero : all_zeros) {
-        print_expr(zero);
+        // print_expr(zero);
         auto& v = expressions[i];
-        print_expr(v);
+        // print_expr(v);
 
         auto sub_lhs = numerator->Substitute(x, *zero);
         auto sub_rhs = expression_pfd->Substitute(x, *zero);
 
-        std::println("lhs ==> {} = {} <== rhs", sub_lhs->Accept(serializer).value(), sub_rhs->Accept(serializer).value());
+        // std::println("lhs ==> {} = {} <== rhs", sub_lhs->Accept(serializer).value(), sub_rhs->Accept(serializer).value());
         auto divd1a = Divide { *sub_rhs, Variable{std::string{ var }} };
         auto divd1a_s = divd1a.Accept(simplify_visitor).value();
         auto divda = Divide { *sub_lhs, *divd1a_s };
@@ -333,7 +332,7 @@ auto pfd_static(std::unique_ptr<Oasis::Expression> numerator, std::unique_ptr<Oa
          */
         auto divda_s2_eval = divda_s2->Accept(eval_visitor).value();
 
-        std::println("x = {} => {} = {}", zero->Accept(serializer).value(), var, divda_s2->Accept(serializer).value());
+        // std::println("x = {} => {} = {}", zero->Accept(serializer).value(), var, divda_s2->Accept(serializer).value());
         final_pfd.emplace_back(std::make_unique<Divide<Expression>>(*divda_s2_eval, *v));
 
         var++;
@@ -341,7 +340,7 @@ auto pfd_static(std::unique_ptr<Oasis::Expression> numerator, std::unique_ptr<Oa
     }
 
     auto final_pfd_result = Oasis::BuildFromVector<Add>(final_pfd);
-    std::println("FINAL PFD RESULT: {}", final_pfd_result->Accept(serializer).value());
+    // std::println("FINAL PFD RESULT: {}", final_pfd_result->Accept(serializer).value());
     return final_pfd_result;
 }
 
@@ -432,8 +431,8 @@ auto Expression::FindZeros() const -> std::vector<std::unique_ptr<Expression>>
 
             auto simplifiedExpr = this->Copy() / std::make_unique<Variable>(var);
             auto res31 = simplifiedExpr->Accept(serializer);
-            if (res31.has_value())
-                std::println("The expression evaluated with x=0 is 0, so using simplified expr: {}", simplifiedReal.GetValue(), res31.value());
+            // if (res31.has_value())
+            //     std::println("The expression evaluated with x=0 is 0, so using simplified expr: {}", simplifiedReal.GetValue(), res31.value());
 
             std::vector<std::unique_ptr<Expression>> rets = simplifiedExpr->FindZeros();
             rets.emplace_back(Oasis::Real{0}.Copy());
