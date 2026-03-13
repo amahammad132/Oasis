@@ -534,6 +534,33 @@ void print_pair(const std::pair<vector<ExpressionPtr>, vector<ExpressionPtr>>& p
     std::println();
 }
 
+// TODO: make this function work for non-integer coefficients
+int multi_gcd(const vector<ExpressionPtr>& numbers) {
+    if (numbers.empty()) return 0;
+
+    int result = static_cast<int>(RecursiveCast<Real>(*numbers.front())->GetValue());
+    for (auto it = std::next(numbers.begin()); it != numbers.end(); ++it) {
+        result = std::gcd(result, static_cast<int>(RecursiveCast<Real>(**it)->GetValue()));
+    }
+    return result;
+}
+
+// get the primitive part of a polynomial (divide the polynomial by its content)
+// Ex. given 6*x^2 + 4*x + 2 => content = gcd(6, 4, 2) = 2,
+// so p = (6/2)x^2 + (4/2)x + (2/2) = 3x^2 + 2x + 1
+auto primitive_part(ExpressionPtr& poly)
+{
+    SimplifyVisitor simplify_visitor {};
+    auto coeffs = all_coeffs(std::forward<ExpressionPtr>(poly));
+
+    auto gcd = (Real { static_cast<double>(multi_gcd(coeffs)) }).Copy();
+    for (ExpressionPtr& coeff : coeffs) {
+        coeff = (coeff / gcd);
+        // coeff = coeff->Accept(simplify_visitor);
+    }
+
+}
+
 std::pair<vector<unique_ptr<Expression>>, vector<unique_ptr<Expression>>> synthetic_divide_list(vector<ExpressionPtr>& dividend, vector<ExpressionPtr>& divisor)
 {
     // Fast polynomial division by using Extended Synthetic Division. Also works with non-monic polynomials.
@@ -750,8 +777,19 @@ auto yuns(ExpressionPtr& f)
     d.emplace_back(std::move(d1));
 
     while (b.back() != Real{1}.Copy()) {
-        // auto a_i = poly_gcd()
+        auto a_i = poly_gcd(b.back(), d.back());
+        auto b_i = synthetic_divide(b.back(), a_i).first;
+        auto c_i = synthetic_divide(d.back(), a_i).first;
+        auto d_i = c_i - b_i->Differentiate(x);
+
+        a.emplace_back(std::move(a_i));
+        b.emplace_back(std::move(b_i));
+        c.emplace_back(std::move(c_i));
+        d.emplace_back(std::move(d_i));
+        i++;
     }
+    std::println("completed {} iterations of yun's algorithm!", i);
+    return a;
 }
 
 
@@ -896,22 +934,22 @@ int main(int argc, char** argv)
     //
     //
     // // Polynomial GCD Test
-    vector<ExpressionPtr> vp;
-    vp.emplace_back(Real{1}.Copy());
-    vp.emplace_back(Real{-3}.Copy());
-    vp.emplace_back(Real{-2}.Copy());
-    vp.emplace_back(Real{7}.Copy());
-    vp.emplace_back(Real{-3}.Copy());
-
-    auto vp_combined = coeffs_to_polynomial(vp)->Copy();
-    // std::println("res polynom: {}", vp_combined->Accept(serializer).value());
-
-
-    vector<ExpressionPtr> vp2;
-    vp2.emplace_back(Real{1}.Copy());
-    vp2.emplace_back(Real{-2}.Copy());
-    vp2.emplace_back(Real{-3}.Copy());
-    auto vp2_combined = coeffs_to_polynomial(vp2)->Copy();
+    // vector<ExpressionPtr> vp;
+    // vp.emplace_back(Real{1}.Copy());
+    // vp.emplace_back(Real{-3}.Copy());
+    // vp.emplace_back(Real{-2}.Copy());
+    // vp.emplace_back(Real{7}.Copy());
+    // vp.emplace_back(Real{-3}.Copy());
+    //
+    // auto vp_combined = coeffs_to_polynomial(vp)->Copy();
+    // // std::println("res polynom: {}", vp_combined->Accept(serializer).value());
+    //
+    //
+    // vector<ExpressionPtr> vp2;
+    // vp2.emplace_back(Real{1}.Copy());
+    // vp2.emplace_back(Real{-2}.Copy());
+    // vp2.emplace_back(Real{-3}.Copy());
+    // auto vp2_combined = coeffs_to_polynomial(vp2)->Copy();
 
     // auto gcds = poly_gcd_list(vp, vp2);
     // std::println("GCD vector size: {} means the degree is {}", gcds.size(), gcds.size() - 1);
@@ -924,10 +962,10 @@ int main(int argc, char** argv)
     // auto divided = synthetic_divide(vp_combined, vp2_combined);
     // auto divided = synthetic_divide_list(vp, vp2);
     // print_pair(divided);
-    // ABOVE WORKS
 
-    auto gcd_using_poly_gcd = poly_gcd(vp_combined, vp2_combined);
-    std::println("gcd using poly gcd: {}", gcd_using_poly_gcd->Accept(serializer).value());
+    // auto gcd_using_poly_gcd = poly_gcd(vp_combined, vp2_combined);
+    // std::println("gcd using poly gcd: {}", gcd_using_poly_gcd->Accept(serializer).value());
+    // ABOVE WORKS
 
     // auto x_expr = x.Copy();
     // auto vp3 = (x_expr * x_expr) + (Real{-1}.Copy() * x_expr) + Real{-6}.Copy();
@@ -952,6 +990,20 @@ int main(int argc, char** argv)
     // auto synthetic_res = synthetic_divide(vp4_combined, vp3_combined);
     // print_pair(synthetic_res);
     // ABOVE WORKS
+
+    vector<ExpressionPtr> g1;
+    g1.emplace_back(Real{1}.Copy());
+    g1.emplace_back(Real{14}.Copy());
+    g1.emplace_back(Real{71}.Copy());
+    g1.emplace_back(Real{154}.Copy());
+    g1.emplace_back(Real{120}.Copy());
+    auto g1_combined = coeffs_to_polynomial(g1)->Copy();
+
+    auto output = yuns(g1_combined);
+    int i = 0;
+    for (ExpressionPtr& expptr : output) {
+        std::println("output[{}] = {}", i, expptr->Accept(serializer).value());
+    }
 
 
 
