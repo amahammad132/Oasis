@@ -593,8 +593,12 @@ std::pair<vector<unique_ptr<Expression>>, vector<unique_ptr<Expression>>> synthe
 // ex. if given [2, 5, -3, 6], return 2x^3+5x^2-3x+6
 auto coeffs_to_polynomial(const std::vector<ExpressionPtr>& coeffs) -> unique_ptr<Expression>
 {
-    // base case (input: [], output: 0)
+    // base case #1 (input: [], output: 0)
     if (coeffs.empty()) return Real{0}.Copy();
+
+    // base case #2 (BuildFromVector needs minimum two terms) (input: [ a ], output: a)
+    if (coeffs.size() == 1) return coeffs[0]->Copy();
+
 
     auto x = Oasis::Variable {"x"};
     std::vector<ExpressionPtr> terms;
@@ -640,7 +644,7 @@ std::pair<unique_ptr<Expression>, unique_ptr<Expression>> synthetic_divide(Expre
     unique_ptr<Expression> new_result_remainder = coeffs_to_polynomial(old_result.second);
     // unique_ptr<Expression> new_result_remainder = new_result_quotient->Copy();
     // std::println("size(new_result_quotient) = {}, size(new_result_remainder) = {}", ne)
-    // std::println("new result remainder: {}", new_result_remainder->Accept(serializer).value());
+    std::println("new result remainder: {}", new_result_remainder->Accept(serializer).value());
     return std::make_pair<ExpressionPtr, ExpressionPtr>(new_result_quotient->Copy(), new_result_remainder->Copy());
     // return std::make_pair(coeffs_to_polynomial(old_result.first), coeffs_to_polynomial(old_result.second));
 }
@@ -675,17 +679,24 @@ auto poly_gcd(ExpressionPtr& a, ExpressionPtr& b) -> ExpressionPtr
     std::println("a = {}, b = {}", a->Accept(serializer).value(), b->Accept(serializer).value());
     auto res = synthetic_divide(a, b);
     std::println("res.first: {}, res.second: {}", res.first->Accept(serializer).value(), res.second->Accept(serializer).value());
-    if (res.second->Is<Real>() && RecursiveCast<Real>(*(res.second))->GetValue() == 0) {
-        std::println("Base case reached! Terminating!");
-        // Scale the resulting expression by the leading coefficient
-        // auto coeffs = all_coeffs(b->Copy());
-        // std::vector<ExpressionPtr> scaled_coeffs;
-        // for (const auto& coeff : coeffs) {
-        //     scaled_coeffs.emplace_back((coeff / coeffs[0])->Simplify());
-        // }
-        // auto monic_b = coeffs_to_polynomial(scaled_coeffs);
-        // return std::move(b);
-        return b->Copy();
+    // SimplifyVisitor simplify_visitor {};
+    // auto res_second_simplified = res.second->Accept(simplify_visitor);
+    if (res.second->Is<Real>()) {
+        std::println("res.second is real!");
+        auto res_second_casted = RecursiveCast<Real>(*(res.second));
+        std::println("val of res.second: {}", res_second_casted->GetValue());
+        if (RecursiveCast<Real>(*(res.second))->GetValue() == 0) {
+            std::println("Base case reached! Terminating!");
+            // Scale the resulting expression by the leading coefficient
+            // auto coeffs = all_coeffs(b->Copy());
+            // std::vector<ExpressionPtr> scaled_coeffs;
+            // for (const auto& coeff : coeffs) {
+            //     scaled_coeffs.emplace_back((coeff / coeffs[0])->Simplify());
+            // }
+            // auto monic_b = coeffs_to_polynomial(scaled_coeffs);
+            // return std::move(b);
+            return b->Copy();
+        }
     }
     // return std::move(poly_gcd(b, res.second));
     return poly_gcd(b, res.second);
@@ -735,7 +746,9 @@ auto yuns(ExpressionPtr& f)
     d.emplace_back(std::move(d1));
     d.emplace_back(std::move(d1));
 
-
+    while (b.back() != Real{1}.Copy()) {
+        // auto a_i = poly_gcd()
+    }
 }
 
 
@@ -880,22 +893,22 @@ int main(int argc, char** argv)
     //
     //
     // // Polynomial GCD Test
-    // vector<ExpressionPtr> vp;
-    // vp.emplace_back(Real{1}.Copy());
-    // vp.emplace_back(Real{-3}.Copy());
-    // vp.emplace_back(Real{-2}.Copy());
-    // vp.emplace_back(Real{7}.Copy());
-    // vp.emplace_back(Real{-3}.Copy());
-    //
-    // auto vp_combined = coeffs_to_polynomial(vp)->Copy();
+    vector<ExpressionPtr> vp;
+    vp.emplace_back(Real{1}.Copy());
+    vp.emplace_back(Real{-3}.Copy());
+    vp.emplace_back(Real{-2}.Copy());
+    vp.emplace_back(Real{7}.Copy());
+    vp.emplace_back(Real{-3}.Copy());
+
+    auto vp_combined = coeffs_to_polynomial(vp)->Copy();
     // std::println("res polynom: {}", vp_combined->Accept(serializer).value());
-    //
-    //
-    // vector<ExpressionPtr> vp2;
-    // vp2.emplace_back(Real{1}.Copy());
-    // vp2.emplace_back(Real{-2}.Copy());
-    // vp2.emplace_back(Real{-3}.Copy());
-    // auto vp2_combined = coeffs_to_polynomial(vp2)->Copy();
+
+
+    vector<ExpressionPtr> vp2;
+    vp2.emplace_back(Real{1}.Copy());
+    vp2.emplace_back(Real{-2}.Copy());
+    vp2.emplace_back(Real{-3}.Copy());
+    auto vp2_combined = coeffs_to_polynomial(vp2)->Copy();
 
     // auto gcds = poly_gcd_list(vp, vp2);
     // std::println("GCD vector size: {} means the degree is {}", gcds.size(), gcds.size() - 1);
@@ -910,29 +923,32 @@ int main(int argc, char** argv)
     // print_pair(divided);
     // ABOVE WORKS
 
-    // auto gcd_using_poly_gcd = poly_gcd(vp_combined, vp2_combined);
-    // std::println("gcd using poly gcd: {}", gcd_using_poly_gcd->Accept(serializer).value());
+    auto gcd_using_poly_gcd = poly_gcd(vp_combined, vp2_combined);
+    std::println("gcd using poly gcd: {}", gcd_using_poly_gcd->Accept(serializer).value());
 
     // auto x_expr = x.Copy();
     // auto vp3 = (x_expr * x_expr) + (Real{-1}.Copy() * x_expr) + Real{-6}.Copy();
     // auto vp4 = (Real{3}.Copy() * x_expr) + Real{11}.Copy();
 
-    vector<ExpressionPtr> vp3;
-    vp3.emplace_back(Real{1}.Copy());
-    vp3.emplace_back(Real{-1}.Copy());
-    vp3.emplace_back(Real{-6}.Copy());
 
-    auto vp3_combined = coeffs_to_polynomial(vp3)->Copy();
-    std::println("res polynom: {}", vp3_combined->Accept(serializer).value());
-
-
-    vector<ExpressionPtr> vp4;
-    vp4.emplace_back(Real{3}.Copy());
-    vp4.emplace_back(Real{11}.Copy());
-    auto vp4_combined = coeffs_to_polynomial(vp4)->Copy();
-
-    auto synthetic_res = synthetic_divide(vp4_combined, vp3_combined);
-    print_pair(synthetic_res);
+    // BELOW WORKS
+    // vector<ExpressionPtr> vp3;
+    // vp3.emplace_back(Real{1}.Copy());
+    // vp3.emplace_back(Real{-1}.Copy());
+    // vp3.emplace_back(Real{-6}.Copy());
+    //
+    // auto vp3_combined = coeffs_to_polynomial(vp3)->Copy();
+    // std::println("res polynom: {}", vp3_combined->Accept(serializer).value());
+    //
+    //
+    // vector<ExpressionPtr> vp4;
+    // vp4.emplace_back(Real{3}.Copy());
+    // vp4.emplace_back(Real{11}.Copy());
+    // auto vp4_combined = coeffs_to_polynomial(vp4)->Copy();
+    //
+    // auto synthetic_res = synthetic_divide(vp4_combined, vp3_combined);
+    // print_pair(synthetic_res);
+    // ABOVE WORKS
 
 
 
