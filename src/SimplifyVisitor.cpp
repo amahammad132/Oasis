@@ -25,6 +25,7 @@
 #include "Oasis/Undefined.hpp"
 #include "Oasis/Variable.hpp"
 
+#include <numeric>
 #include <print>
 
 namespace {
@@ -547,7 +548,7 @@ auto SimplifyVisitor::TypedVisit(const Multiply<>& multiply) -> RetT
         if (!(m1 || m2)) {
             return m1;
         }
-        return gsl::not_null { Divide<Expression> { *(m1.value()), *(m2.value()) }.Generalize() };
+        return gsl_lite::not_null { Divide<Expression> { *(m1.value()), *(m2.value()) }.Generalize() };
     }
 
     if (auto exprCase = RecursiveCast<Multiply<Expression>>(simplifiedMultiply); exprCase != nullptr) {
@@ -973,7 +974,7 @@ auto SimplifyVisitor::TypedVisit(const Divide<>& divide) -> RetT
                 && (std::abs(divisor_long - divisor.GetValue()) <= EPSILON)) {
 
                 // ex. 6/1 -> 6
-                if (dividend_long % divisor_long == 0) return gsl::not_null { std::make_unique<Real>(dividend_long / divisor_long) };
+                if (dividend_long % divisor_long == 0) return gsl_lite::not_null { std::make_unique<Real>(dividend_long / divisor_long) };
 
                 auto gcf = std::gcd(dividend_long, divisor_long);
                 if (gcf != 1) {
