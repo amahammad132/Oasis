@@ -636,7 +636,7 @@ auto poly_gcd(ExpressionPtr& a, ExpressionPtr& b) -> ExpressionPtr
     } else {
         std::println("remainder is not real!");
     }
-    std::println("above works");
+    // std::println("above works");
 
     auto rem_copy = rem->Copy();
     // unique_ptr<ExpressionPtr> rem1;
@@ -706,15 +706,20 @@ auto yuns(ExpressionPtr& f)
     d.emplace_back(d1->Copy());
     d.emplace_back(std::move(d1));
 
-    while (b.back() != Real{1}.Copy()) {
+    while (!b.back()->Is<Real>() && b.back() != Real{1}.Copy()) {
         // remove this later - iteration limit
-        if (i > 1) break;
+        if (i > 20) break;
 
         // std::println("YUNS: calling poly_gcd(a, b) inside loop w/ a = {}, b = {}", b.back()->Copy()->Accept(serializer).value(), d.back()->Copy()->Accept(serializer).value());
         auto a_i = poly_gcd(b.back(), d.back());
         auto b_i = synthetic_divide(b.back(), a_i).first;
         auto c_i = synthetic_divide(d.back(), a_i).first;
         auto d_i = c_i - b_i->Differentiate(x);
+
+        std::println("a[{}]: {}", i, a_i->Accept(serializer).value());
+        std::println("b[{}]: {}", i+1, b_i->Accept(serializer).value());
+        std::println("c[{}]: {}", i+1, c_i->Accept(serializer).value());
+        std::println("d[{}]: {}", i+1, d_i->Accept(serializer).value());
 
         a.emplace_back(std::move(a_i));
         b.emplace_back(std::move(b_i));
@@ -726,6 +731,50 @@ auto yuns(ExpressionPtr& f)
     return a;
 }
 
+auto degree(ExpressionPtr& f)
+{
+    // maybe add expand & simplify step here.
+    SimplifyVisitor simplify_visitor {};
+    auto f_coeffs = all_coeffs(f);
+    auto f_degree = std::max(static_cast<int>(f_coeffs.size()) - 1, 0);
+    return f_degree;
+}
+
+auto factor(ExpressionPtr& f)
+{
+    std::list<std::list<ExpressionPtr>> all_yuns_runs;
+    auto result_list_1 = yuns(f);
+    all_yuns_runs.emplace_back(std::move(result_list_1));
+    // ExpressionPtr& val = result_list_1.front();
+    // while (all_factors.back().front()->Is<Add>() && RecursiveCast<Real>(*(all_factors.back().back()))->GetValue() == 1) {
+    while (degree(all_yuns_runs.back().front()) > 1) {
+        all_yuns_runs.emplace_back(std::move(yuns(all_yuns_runs.back().front())));
+    }
+
+    InFixSerializer serializer;
+    int i = 0;
+    for (const auto& fact : all_yuns_runs) {
+        std::println("yuns run {}:", i);
+        for (const auto& expptr : fact) {
+            std::println("    {}", expptr->Accept(serializer).value());
+        }
+        i++;
+    }
+    // return all_factors;
+    // std::println("val: {}", val->Accept(InFixSerializer{}).value());
+    // while (val )
+    std::list<ExpressionPtr> res;
+    for (auto it = all_yuns_runs.begin(); it != all_yuns_runs.end(); ++it) {
+        // Only the last run of yuns algorithm provides a full list of factors.
+        // Previous runs will contain a partially factored expression as the first list element
+        if (std::next(it) == all_yuns_runs.end()) res.emplace_back(std::move(*it->begin()));
+        for (auto it1 = std::next(it->begin()); it1 != it->end(); ++it1) {
+            res.emplace_back((*it1)->Copy());
+        }
+    }
+
+    return res;
+}
 
 
 
@@ -946,18 +995,23 @@ int main(int argc, char** argv)
     g1.emplace_back(Real{-54}.Copy());
     auto g1_combined = coeffs_to_polynomial(g1)->Copy();
 
-    auto output = yuns(g1_combined);
-    int i = 0;
-    for (ExpressionPtr& expptr : output) {
-        std::println("output[{}] = {}", i, expptr->Accept(serializer).value());
+    // auto output = yuns(g1_combined);
+    // int i = 0;
+    // for (ExpressionPtr& expptr : output) {
+    //     std::println("output[{}] = {}", i, expptr->Accept(serializer).value());
+    //     i++;
+    // }
+
+    auto all_facts = factor(g1_combined);
+    for (const auto& fact : all_facts) {
+        std::println("fact: {}", fact->Accept(serializer).value());
     }
 
-
-    std::println("\n\n\n\n\nWeird behavior:");
-    auto ea1 = Real{6}.Copy()*(x_expr*x_expr) + Real{3}.Copy()*x_expr + Real{-15}.Copy();
-    auto ea2 = Real{3}.Copy()*(x_expr*x_expr) + Real{4}.Copy()*x_expr + Real{-5}.Copy();
-    auto subt = ea1 - ea2;
-    std::println("subtracted: {}", subt->Accept(serializer).value());
+    // std::println("\n\n\n\n\nWeird behavior:");
+    // auto ea1 = Real{6}.Copy()*(x_expr*x_expr) + Real{3}.Copy()*x_expr + Real{-15}.Copy();
+    // auto ea2 = Real{3}.Copy()*(x_expr*x_expr) + Real{4}.Copy()*x_expr + Real{-5}.Copy();
+    // auto subt = ea1 - ea2;
+    // std::println("subtracted: {}", subt->Accept(serializer).value());
 
 
 
