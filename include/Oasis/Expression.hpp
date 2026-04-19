@@ -24,6 +24,7 @@ enum class ExpressionType {
     Real,
     Imaginary,
     Variable,
+    Polynomial,
     Add,
     Subtract,
     Multiply,
@@ -192,6 +193,11 @@ public:
     template <IVisitor T>
         requires ExpectedWithString<typename T::RetT>
     auto Accept(T& visitor) const -> typename T::RetT;
+
+    auto AcceptAny(Visitor& visitor) const -> any
+    {
+        return AcceptInternal(visitor);
+    }
 
     virtual ~Expression() = default;
 

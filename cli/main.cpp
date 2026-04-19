@@ -33,6 +33,7 @@
 #include <map>
 
 #include "Oasis/DifferentiateVisitor.hpp"
+#include "Oasis/Polynomial.hpp"
 #include "Oasis/SimplifyVisitor.hpp"
 
 template <typename FnT>
@@ -1002,17 +1003,17 @@ int main(int argc, char** argv)
     //     i++;
     // }
 
-    auto all_facts = factor(g1_combined);
-    for (const auto& fact : all_facts) {
-        std::println("fact: {}", fact->Accept(serializer).value());
-    }
+    // auto all_facts = factor(g1_combined);
+    // for (const auto& fact : all_facts) {
+    //     std::println("fact: {}", fact->Accept(serializer).value());
+    // }
 
-    // std::println("\n\n\n\n\nWeird behavior:");
-    // auto ea1 = Real{6}.Copy()*(x_expr*x_expr) + Real{3}.Copy()*x_expr + Real{-15}.Copy();
-    // auto ea2 = Real{3}.Copy()*(x_expr*x_expr) + Real{4}.Copy()*x_expr + Real{-5}.Copy();
-    // auto subt = ea1 - ea2;
-    // std::println("subtracted: {}", subt->Accept(serializer).value());
-
+    // auto poly = Polynomial(std::move(g1_combined));
+    auto poly = Polynomial {1, 9, 24, -2, -99, -135, -54};
+    auto exa = poly.GetExpression();
+    auto va = all_coeffs(exa);
+    // auto poly = Polynomial {5};
+    // std::println("poly: {}", poly.Accept(serializer).value());
 
 
 

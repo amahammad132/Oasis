@@ -20,6 +20,7 @@ set(Oasis_HEADERS
     Oasis/Multiply.hpp
     Oasis/Negate.hpp
     Oasis/Pi.hpp
+    Oasis/Polynomial.hpp
     Oasis/Real.hpp
     Oasis/RecursiveCast.hpp
     Oasis/SimplifyVisitor.hpp

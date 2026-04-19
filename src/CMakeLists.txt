@@ -24,6 +24,7 @@ set(Oasis_SOURCES
     Multiply.cpp
     Negate.cpp
     Pi.cpp
+    Polynomial.cpp
     Real.cpp
     SimplifyVisitor.cpp
     Sine.cpp
