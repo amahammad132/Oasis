@@ -732,14 +732,14 @@ auto yuns(ExpressionPtr& f)
     return a;
 }
 
-auto degree(ExpressionPtr& f)
-{
-    // maybe add expand & simplify step here.
-    SimplifyVisitor simplify_visitor {};
-    auto f_coeffs = all_coeffs(f);
-    auto f_degree = std::max(static_cast<int>(f_coeffs.size()) - 1, 0);
-    return f_degree;
-}
+// auto degree(ExpressionPtr& f)
+// {
+//     // maybe add expand & simplify step here.
+//     SimplifyVisitor simplify_visitor {};
+//     auto f_coeffs = all_coeffs(f);
+//     auto f_degree = std::max(static_cast<int>(f_coeffs.size()) - 1, 0);
+//     return f_degree;
+// }
 
 auto factor(ExpressionPtr& f)
 {
@@ -986,15 +986,15 @@ int main(int argc, char** argv)
 
 
     // x**6 + 9*x**5 + 24*x**4 - 2*x**3 - 99*x**2 - 135*x - 54
-    vector<ExpressionPtr> g1;
-    g1.emplace_back(Real{1}.Copy());
-    g1.emplace_back(Real{9}.Copy());
-    g1.emplace_back(Real{24}.Copy());
-    g1.emplace_back(Real{-2}.Copy());
-    g1.emplace_back(Real{-99}.Copy());
-    g1.emplace_back(Real{-135}.Copy());
-    g1.emplace_back(Real{-54}.Copy());
-    auto g1_combined = coeffs_to_polynomial(g1)->Copy();
+    // vector<ExpressionPtr> g1;
+    // g1.emplace_back(Real{1}.Copy());
+    // g1.emplace_back(Real{9}.Copy());
+    // g1.emplace_back(Real{24}.Copy());
+    // g1.emplace_back(Real{-2}.Copy());
+    // g1.emplace_back(Real{-99}.Copy());
+    // g1.emplace_back(Real{-135}.Copy());
+    // g1.emplace_back(Real{-54}.Copy());
+    // auto g1_combined = coeffs_to_polynomial(g1)->Copy();
 
     // auto output = yuns(g1_combined);
     // int i = 0;
@@ -1009,14 +1009,38 @@ int main(int argc, char** argv)
     // }
 
     // auto poly = Polynomial(std::move(g1_combined));
-    auto poly = Polynomial {1, 9, 24, -2, -99, -135, -54};
-    auto exa = poly.GetExpression();
-    auto va = all_coeffs(exa);
+    // auto poly = Polynomial {1, 9, 24, -2, -99, -135, -54};
+    // auto poly = Polynomial {1, 45, 870, 9450, 63273, 269325, 723680, 1172700, 1026576, 362880};
+    // auto exa = poly.GetExpression();
+    // auto va = poly.get_coefficients();
+    // for (const auto& coeff : va) {
+    //     std::println("coeff: {}", coeff->Accept(serializer).value());
+    // }
+    // auto c = Polynomial::factor(poly);
+    // for (const auto& fact : c) {
+    //     std::println("factor: {}", fact.Accept(serializer).value());
+    // }
+    // auto d = Polynomial::factor_l(poly);
+    // std::println("d: {}", d->Accept(serializer).value());
+    // std::vector<Polynomial> c_v = std::vector(c.begin(), c.end());
+    // std::vector<ExpressionPtr> c_v;
+    // std::transform(c.begin(), c.end(), std::back_inserter(c_v), [](const auto& p) { return p.GetExpression(); });
+    // ExpressionPtr re_combined = Oasis::BuildFromVector<Multiply>(c_v)->Accept(simplify_visitor).value();
+    // auto recombined1 = Polynomial(*re_combined);
+    // auto recombined2 = recombined1.expand();
+    // auto recombined1 = expand_polynomial3(re_combined);
+    // std::println("re_combined: {}", recombined1->Accept(serializer).value());
     // auto poly = Polynomial {5};
     // std::println("poly: {}", poly.Accept(serializer).value());
 
 
 
+    // cantor-zassenhaus testing
+    auto poly = Polynomial {1, 5, 6};
+    auto result = Polynomial::cantor_zassenhaus_equal_degree(poly, 1, 7);
+    for (const auto& factor : result) {
+        std::println("factor: {}", factor.Accept(serializer).value());
+    }
 
     return EXIT_SUCCESS;
 }

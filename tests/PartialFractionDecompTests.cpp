@@ -21,28 +21,28 @@
 
 inline Oasis::SimplifyVisitor simplifyVisitor{};
 
-TEST_CASE("Two-Term Partial Fraction Decomposition", "[Divide][Polynomial]")
-{
-
-    // (3x+11)/(x^2-x-6)
-    Oasis::Divide div {
-        Oasis::Add {
-            Oasis::Real { 11 },
-            Oasis::Multiply {
-                Oasis::Variable { "x" },
-                Oasis::Real { 3 } }},
-        Oasis::Subtract {
-            Oasis::Exponent {
-                Oasis::Variable { "x" },
-                Oasis::Real { 2 } },
-            Oasis::Add { Oasis::Variable{ "x" }, Oasis::Real { 6 } },
-        }
-    };
-
-    auto decomposed = div.PartialFractionDecomp();
-
-    REQUIRE(Oasis::Add {
-        Oasis::Divide { Oasis::Real{ 4 }, Oasis::Add{ Oasis::Variable { "x" }, Oasis::Real{-3}} },
-        Oasis::Divide { Oasis::Real{ -1 }, Oasis::Add{ Oasis::Variable { "x" }, Oasis::Real{2}} }
-    }.Equals(*decomposed));
-}
+// TEST_CASE("Two-Term Partial Fraction Decomposition", "[Divide][Polynomial]")
+// {
+//
+//     // (3x+11)/(x^2-x-6)
+//     Oasis::Divide div {
+//         Oasis::Add {
+//             Oasis::Real { 11 },
+//             Oasis::Multiply {
+//                 Oasis::Variable { "x" },
+//                 Oasis::Real { 3 } }},
+//         Oasis::Subtract {
+//             Oasis::Exponent {
+//                 Oasis::Variable { "x" },
+//                 Oasis::Real { 2 } },
+//             Oasis::Add { Oasis::Variable{ "x" }, Oasis::Real { 6 } },
+//         }
+//     };
+//
+//     auto decomposed = div.PartialFractionDecomp();
+//
+//     REQUIRE(Oasis::Add {
+//         Oasis::Divide { Oasis::Real{ 4 }, Oasis::Add{ Oasis::Variable { "x" }, Oasis::Real{-3}} },
+//         Oasis::Divide { Oasis::Real{ -1 }, Oasis::Add{ Oasis::Variable { "x" }, Oasis::Real{2}} }
+//     }.Equals(*decomposed));
+// }

@@ -24,7 +24,7 @@ enum class ExpressionType {
     Real,
     Imaginary,
     Variable,
-    Polynomial,
+    // Polynomial,
     Add,
     Subtract,
     Multiply,
