@@ -992,7 +992,7 @@ auto random_poly_mod(int q, int n)
     // coeffs = [random.randrange(q) for _ in range(n)]
     // return Poly(coeffs, x, modulus=q)
     std::random_device rd;  // a seed source for the random number engine
-    std::mt19937 gen(rd()); // mersenne_twister_engine seeded with rd()
+    std::mt19937 gen(42); // mersenne_twister_engine seeded with rd()
     std::uniform_int_distribution<> distrib(0, q-1);
 
     // // Use distrib to transform the random unsigned int
@@ -1059,32 +1059,14 @@ auto poly_pow_mod(Polynomial& base, int exp, Polynomial& mod_poly, int modulus) 
     return result;
 }
 
-template<int X, unsigned int P>
-struct Pow
-{
-    enum { result = X*Pow<X,P-1>::result };
-};
-template<int X>
-struct Pow<X,0>
-{
-    enum { result = 1 };
-};
-template<int X>
-struct Pow<X,1>
-{
-    enum { result = X };
-};
-
-// template <unsigned int p>
-int constexpr IntPower(const int p, const int x)
+constexpr int IntPower(const int x, const int p)
 {
     if (p == 0) return 1;
     if (p == 1) return x;
 
-    // int tmp = IntPower<p / 2>(x);
-    int tmp = IntPower(p / 2, x);
-    if ((p % 2) == 0) { return tmp * tmp; }
-    else { return x * tmp * tmp; }
+    int tmp = IntPower(x, p/2);
+    if ((p % 2) == 0) return tmp * tmp;
+    return x * tmp * tmp;
 }
 
 auto Polynomial::cantor_zassenhaus_equal_degree(Polynomial& f, int d, int q) -> std::vector<Polynomial>
