@@ -131,13 +131,13 @@ Polynomial::Polynomial(std::span<Real>&& coeffs)
     std::vector<std::unique_ptr<Expression>> coeffs_vec;
     int i = coeffs.size();
     for (auto& coeff : coeffs) {
-    // auto it = coeffs.begin();
-    // constexpr auto EPSILON = std::numeric_limits<float>::epsilon();
-    // while (std::abs(it->GetValue()) < EPSILON && it != coeffs.end()) {
-    //     ++it;
-    //     --i;
-    // }
-    // for (; it != coeffs.end(); ++it) {
+        // auto it = coeffs.begin();
+        // constexpr auto EPSILON = std::numeric_limits<float>::epsilon();
+        // while (std::abs(it->GetValue()) < EPSILON && it != coeffs.end()) {
+        //     ++it;
+        //     --i;
+        // }
+        // for (; it != coeffs.end(); ++it) {
         coeffs_vec.emplace_back(Oasis::Multiply{coeff, Oasis::Exponent{x, Real{ static_cast<double>(i - 1)}}}.Generalize());
         --i;
     }
@@ -181,13 +181,13 @@ Polynomial::Polynomial(std::span<std::unique_ptr<Expression>>&& coeffs)
     // }
     // std::println("it match?: {}", it != coeffs.end());
     for (auto& coeff : coeffs) {
-    // for (; it != coeffs.end(); ++it) {
-    //     std::println("Adding coeff {} at i={}", (*it)->Accept(serializer).value(), i);
-    //     coeffs_vec.emplace_back(Oasis::Multiply{**it, Oasis::Exponent{x, Real{ static_cast<double>(i - 1)}}}.Generalize());
-    //     std::println("finished adding.");
+        // for (; it != coeffs.end(); ++it) {
+        //     std::println("Adding coeff {} at i={}", (*it)->Accept(serializer).value(), i);
+        //     coeffs_vec.emplace_back(Oasis::Multiply{**it, Oasis::Exponent{x, Real{ static_cast<double>(i - 1)}}}.Generalize());
+        //     std::println("finished adding.");
 
 
-    // for (auto& coeff : coeffs) {
+        // for (auto& coeff : coeffs) {
         coeffs_vec.emplace_back(Oasis::Multiply{*coeff, Oasis::Exponent{x, Real{ static_cast<double>(i - 1)}}}.Generalize());
         --i;
     }
@@ -494,9 +494,9 @@ auto Polynomial::expand() const -> Polynomial
 
                         // std::println("lhs_new: {}, rhs_new: {}", lhs_new->Accept(serializer).value(), rhs_new->Accept(serializer).value());
                         result.emplace_back(lhs_new * rhs_new);
-                    } else {
-                        result.emplace_back(lhs_exp * rhs_exp);
-                    }
+                            } else {
+                                result.emplace_back(lhs_exp * rhs_exp);
+                            }
                 }
             }
 
@@ -592,6 +592,7 @@ std::pair<std::vector<std::unique_ptr<Expression>>, std::vector<std::unique_ptr<
     std::vector<std::unique_ptr<Expression>> out {}; // Copy the dividend
     for (const auto& d : dividend) {
         out.emplace_back(d->Copy());
+        // std::println("out added: {}", d->Accept(serializer).value());
         // std::println("out val: {}", d->Accept(serializer).value());
     }
 
@@ -620,6 +621,7 @@ std::pair<std::vector<std::unique_ptr<Expression>>, std::vector<std::unique_ptr<
     std::vector<std::unique_ptr<Expression>> remainder {};
 
     int sep = out.size() - (divisor.size() - 1);
+    // std::println("sep: {}", sep);
     for (int i = 0; i < sep; i++) {
         quotient.emplace_back(out[i]->Accept(simplify_visitor).value());
         // auto out_i_copy = out[i]->Copy();
@@ -627,7 +629,7 @@ std::pair<std::vector<std::unique_ptr<Expression>>, std::vector<std::unique_ptr<
         // quotient.emplace_back(tmp1.get());
         // std::println("adding a quotient.");
     }
-    for (int i = sep; i < out.size(); ++i) {
+    for (int i = std::max(0, sep); i < out.size(); ++i) {
         remainder.emplace_back(out[i]->Accept(simplify_visitor).value());
         // auto tmp1 = out[i]->Accept(simplify_visitor).value();
         // remainder.emplace_back(tmp1.get());
@@ -703,6 +705,99 @@ auto Polynomial::monic() const -> Polynomial
     auto monic_b = Polynomial(scaled_coeffs);
     return monic_b;
 }
+
+// returns base^exp (mod m)
+long long power(long long base, long long exp, long long m) {
+    long long res = 1;
+    base %= m;
+    while (exp > 0) {
+        if (exp % 2 == 1) res = (res * base) % m;
+        base = (base * base) % m;
+        exp /= 2;
+    }
+    return res;
+}
+
+// constexpr int IntPower(const int x, const int p)
+
+template<typename T, typename U>
+constexpr T IntPower(const T x, const U p)
+{
+    if (p == 0) return 1;
+    if (p == 1) return x;
+
+    int tmp = IntPower(x, p/2);
+    if ((p % 2) == 0) return tmp * tmp;
+    return x * tmp * tmp;
+}
+
+// fixes problem with negative modulo positive being negative
+// ex. -2 % 7 = -2, but it should be 5
+// template<typename T, typename U>
+// requires std::integral<T> && std::integral<U>
+// T mod2(T a, U b) {
+//     return ((a % b) + b) % b;
+// }
+//
+// template<typename T, typename U>
+// requires std::integral<T> && std::integral<U>
+// T mod1(T a, U b) {
+//     auto mod_1 = ((a % b) + b) % b;
+//     auto mod_2 = a % b;
+//
+//     std::println("mod1({}, {}) => {}, {}", a, b, mod_1, mod_2);
+//     if (std::abs(mod_1) < std::abs(mod_2)) return mod_1;
+//     return mod_2;
+// }
+
+// returns a value such that a * modInversePrime(a, m) = 1 (mod m)
+long long modInversePrimeOld(const long long a, long long m) {
+    auto tmp = power(a, m - 2, m);
+    std::println("modInversePrime({}, {}) => {}", a, m, tmp);
+    return tmp;
+}
+
+template<typename T, typename U>
+requires std::integral<T> && std::integral<U>
+T mod(T a, U b) {
+    T rem = a % b;
+    // Calculate the alternative remainder by moving toward the next/previous multiple
+    T alt_rem = (rem > 0) ? (rem - std::abs(b)) : (rem + std::abs(b));
+
+    // Return the one with the smaller absolute value
+    if (std::abs(alt_rem) < std::abs(rem)) {
+        return alt_rem;
+    }
+    return rem;
+}
+
+// returns a value such that a * modInversePrime(a, m) = 1 (mod m)
+long long modInversePrime(const long long a, const long long m) {
+    auto tmp = mod(IntPower(a, m - 2), m);
+    std::println("modInversePrime({}, {}) => {}", a, m, tmp);
+    return tmp;
+}
+
+
+
+
+// find the monic form over the finite-field of order q (GF(q)), where q is a prime number
+// assuming polynomial has integer coefficients
+auto Polynomial::monic(int q) const -> Polynomial
+{
+    SimplifyVisitor simplify_visitor {};
+    auto coeffs = get_coefficients();
+    auto mod_inv = modInversePrime(static_cast<long>(RecursiveCast<Real>(*coeffs.front())->GetValue()), q);
+    std::vector<std::unique_ptr<Expression>> scaled_coeffs;
+    for (const auto& coeff : coeffs) {
+        auto coeff_int = static_cast<int>(RecursiveCast<Real>(*coeff)->GetValue());
+        auto new_coeff = mod(mod_inv * coeff_int, q);
+        std::println("coeff {} => ({}*{})%{} => {}", coeff_int, mod_inv, coeff_int, q, new_coeff);
+        scaled_coeffs.emplace_back(Real{static_cast<double>(new_coeff)}.Accept(simplify_visitor).value());
+    }
+    return Polynomial(scaled_coeffs);
+}
+
 
 std::pair<Polynomial, Polynomial> synthetic_pseudo_divide(Polynomial& dividend, Polynomial& divisor)
 {
@@ -1009,36 +1104,103 @@ auto random_poly_mod(int q, int n)
     return Polynomial(coeffs);
 }
 
-// fixes problem with negative modulo positive being negative
-// ex. -2 % 7 = -2, but it should be 5
-int mod(int a, int b) {
-    return ((a % b) + b) % b;
-}
-
 // only works with integer coefficients
 auto poly_mod(Polynomial& p, int modulus) -> Polynomial
 {
+    std::println();
     InFixSerializer serializer {};
     auto coeffs = p.get_coefficients();
     std::vector<std::unique_ptr<Expression>> coeffs_mod;
     for (const auto& coeff : coeffs) {
         auto t = RecursiveCast<Real>(*coeff)->GetValue();
-        // std::println("coeff: {} == {}", t, static_cast<long>(t) % modulus);
+        std::println("coeff: {} => {}", t, mod(static_cast<long>(t),  modulus));
         // coeffs_mod.emplace_back(Real{ static_cast<double>(static_cast<long>(RecursiveCast<Real>(*coeff)->GetValue()) % modulus) }.Copy());
         coeffs_mod.emplace_back(Real{ static_cast<double>(mod(static_cast<long>(t), modulus)) }.Copy());
     }
     return Polynomial {coeffs_mod};
 }
 
-auto poly_pow_mod(Polynomial& base, int exp, Polynomial& mod_poly, int modulus) -> Polynomial
+// find the polynomial greatest common divisor of a and b, over the finite field/galois field q
+auto poly_gcd_galois(Polynomial& a_orig, Polynomial& b_orig, const int q) -> Polynomial
 {
-    // Compute base^exp mod mod_poly using repeated squaring.
+    auto a = poly_mod(a_orig, q);
+    auto b = poly_mod(b_orig, q);
+    // auto b = b_orig;
+
+    SimplifyVisitor simplify_visitor {};
+    InFixSerializer serializer {};
+    std::println("poly_gcd_galois({}, {}) called!", a.Accept(serializer).value(), b.Accept(serializer).value());
+    if (b.Is<Real>()) {
+        std::println("B is real. ({})", RecursiveCast<Real>(*b.GetExpression())->GetValue());
+        // if (std::abs(RecursiveCast<Real>(*b.GetExpression())->GetValue()) < std::numeric_limits<float>::epsilon()) {
+        if (RecursiveCast<Real>(*b.GetExpression())->GetValue() == 0) {
+            std::println("Base case reached1! Terminating!");
+            // return std::move(a);
+            // auto u = poly_mod(a, q);
+            // return a.Copy();
+            // return u;
+            return a.monic(q);
+        }
+    }
+
+
+    // std::println("a = {}, b = {}", a->Accept(serializer).value(), b->Accept(serializer).value());
+    auto rem = synthetic_pseudo_divide(a, b).second;
+    std::println("synthetic pseudo divide complete.");
+
+    std::println("rem: {}", rem.Accept(serializer).value());
+    rem = poly_mod(rem, q);
+
+    std::println("rem: {}", rem.Accept(serializer).value());
+    rem = rem.primitive_part();
+
+    std::println("rem3: {}", rem.Accept(serializer).value());
+
+    auto rem_a = rem.GetExpression();
+    std::println("primitive part complete.");
+
+    // std::println("rem: <{}>, type: {}", rem.Accept(serializer).value(), rem.GetType() == ExpressionType::Add ? "Real" : "Polynomial" );
+    // std::println("res.first: {}, res.second: {}, rem: {}", res.first->Accept(serializer).value(), res.second->Accept(serializer).value(), rem->Accept(serializer).value());
+    if (rem_a->Is<Real>()) {
+        std::println("res.second is real!");
+        auto res_second_casted = RecursiveCast<Real>(*(rem.GetExpression()) );
+        std::println("val of res.second: {}", res_second_casted->GetValue());
+
+        if (RecursiveCast<Real>(*(rem.GetExpression()))->GetValue() == 0) {
+            std::println("Base case reached! Terminating!");
+            auto monic_b = b.monic(q);
+            return monic_b;
+        }
+    } else {
+        std::println("remainder is not real!");
+    }
+    // std::println("above works");
+
+    auto rem_copy = Polynomial(rem);
+    // std::unique_ptr<std::unique_ptr<Expression>> rem1;
+    // auto rem1 = std::move(rem);
+    // prevent infinite recursion
+    if (rem.degree() >= b.degree()) {
+        std::println("deg(rem) >= deg(b)");
+        auto rem1 = synthetic_divide(rem_copy, b).second;
+        rem1 = poly_mod(rem1, q);
+        std::println("about to recurse poly_gcd_galois 1!");
+        return poly_gcd(b, rem1);
+    }
+
+    std::println("about to recurse poly_gcd_galois!");
+    return poly_gcd_galois(b, rem, q);
+}
+
+auto poly_pow_mod(Polynomial base, int exp, Polynomial& mod_poly, int modulus) -> Polynomial
+{
+    // Compute base^exp % mod_poly using repeated squaring.
     Polynomial result = Polynomial{1};
     base = synthetic_divide(base, mod_poly).second;
 
     InFixSerializer ser {};
     while (exp > 0) {
-        std::println("result: {}\nbase: {}\nexp: {}\n", result.Accept(ser).value(), base.Accept(ser).value(), exp);
+        // std::println("result: {}\nbase: {}\nexp: {}\n", result.Accept(ser).value(), base.Accept(ser).value(), exp);
         if (exp & 1) {
             auto tmp = result * base;
             auto tmp3 = tmp.expand();
@@ -1052,21 +1214,105 @@ auto poly_pow_mod(Polynomial& base, int exp, Polynomial& mod_poly, int modulus) 
         auto tmp5 = poly_mod(tmp4, modulus);
         base = synthetic_divide(tmp5, mod_poly).second;
         base = poly_mod(base, modulus);
-        std::println("before mod {}: {}\nafter mod {}: {}\nafter mod {}: {}", modulus, tmp4.Accept(ser).value(), modulus, tmp5.Accept(ser).value(), mod_poly.Accept(ser).value(), base.Accept(ser).value());
+        // std::println("before mod {}: {}\nafter mod {}: {}\nafter mod {}: {}", modulus, tmp4.Accept(ser).value(), modulus, tmp5.Accept(ser).value(), mod_poly.Accept(ser).value(), base.Accept(ser).value());
         exp >>= 1;
     }
 
     return result;
 }
 
-constexpr int IntPower(const int x, const int p)
-{
-    if (p == 0) return 1;
-    if (p == 1) return x;
+// auto prime_iter(int start, int stop)
+// {
+//     for (int i = start; i < stop; i++) {}
+//     unsigned int p = boost::math::prime(99);
+// }
 
-    int tmp = IntPower(x, p/2);
-    if ((p % 2) == 0) return tmp * tmp;
-    return x * tmp * tmp;
+
+// get the leading coefficient of a polynomial
+auto Polynomial::LC() const -> std::unique_ptr<Expression>
+{
+    auto coeffs = get_coefficients();
+    return std::move(coeffs.front());
+}
+
+// pick a good prime number for factoring a polynomial
+// and using hensel lifting to return the polynomial to standard form
+auto auto_choose_prime_for_hensel(Polynomial& f, int start = 3, int stop = 200) -> unsigned int
+{
+    auto f_content = f.primitive_part();
+
+    if (f_content.degree() <= 1)
+        throw std::runtime_error("Need degree >= 2 to choose a Hensel prime.");
+
+    const auto lc = static_cast<int>(RecursiveCast<Real>(*f_content.LC())->GetValue());
+
+    const std::array<unsigned int, 100> primes = {
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+        73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
+        179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281,
+        283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409,
+        419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523, 541
+    };
+
+    int i = 0;
+    while (primes[i] < start) i++;
+    while (primes[i] <= stop) {
+        auto p = primes[i];
+        if (lc % p == 0)
+            continue;
+
+        auto f_fp = f_content;
+        f_fp = poly_mod(f_fp, p);
+        if (f_fp.degree() <= 0)
+            continue;
+        Variable x {"x"};
+        auto f_fp_prime = f_fp.Differentiate(x);
+        if (poly_gcd_galois(f_fp, f_fp_prime, p) == Real{1}.Copy())
+            return p;
+        i++;
+    }
+
+    throw std::runtime_error("No suitable prime found. Increase the stopping value.");
+}
+
+// factors a monic square-free polynomial in the Galois field/finite field F_q
+// returns all pairs of factors (g, d) such that
+//      f has an irreducible factor of degree d
+//      g is the product of all monic irreducible factors of f of degree d
+// ex. (x^3+8x^2+22x+21) = (x+3)(x^2+5x+7) -> x+3, x^2+5x+7
+auto distinct_degree_factor(Polynomial& f, int q) -> std::vector<std::pair<Polynomial, int>>
+{
+    Variable x {"x"};
+    InFixSerializer serializer {};
+
+    int i = 1;
+    std::vector<std::pair<Polynomial, int>> S;
+    S.reserve(f.degree());
+    // std::println("S size: {}", S.size());
+    auto f_star = f;
+    while (f_star.degree() >= 2*i) {
+        Polynomial exp = Subtract{ Exponent{x, Real{static_cast<double>(IntPower(q, i))}}, x}.Copy();
+        auto g = poly_gcd_galois(f_star, exp, q);
+        if (g.GetExpression() != Real{1}.Copy()) {
+            // std::println("g: {}", g.Accept(serializer).value());
+            S.emplace_back(std::move(g), i);
+
+            f_star = synthetic_divide(f_star, g).first;
+            f_star = poly_mod(f_star, q);
+        }
+        i++;
+    }
+    if (f_star != Real{1}.Copy()) {
+        S.emplace_back(std::move(f_star), f_star.degree());
+        // std::println("S size: {}", S.size());
+    }
+    if (S.empty()) {
+        // std::println("S is empty! emplacing again.");
+        S.emplace_back(std::make_pair<Polynomial, int>(f.Copy(), 1));
+        // std::println("S size: {}", S.size());
+    }
+    // std::println("S size: {}", S.size());
+    return S;
 }
 
 auto Polynomial::cantor_zassenhaus_equal_degree(Polynomial& f, int d, int q) -> std::vector<Polynomial>

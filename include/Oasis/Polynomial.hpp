@@ -17,15 +17,10 @@ class Polynomial : public Expression {
 public:
     Polynomial() = default;
 
-    // explicit Polynomial(const Expression* ex) : expr_(ex ? ex->Copy() : nullptr);
-    // explicit Polynomial(const std::unique_ptr<Expression> ex) : expr_(std::move(ex));
-
     explicit Polynomial(std::unique_ptr<Expression>&& other);
     Polynomial(const Polynomial& other);
     Polynomial(const Expression& expression);
     Polynomial(const Expression* expression);
-    // Polynomial(std::initializer_list<Oasis::Real> coeffs);
-    // template<std::ranges::range R> Polynomial(R&& coeffs);
     explicit Polynomial(std::span<Real>&& coeffs);
     Polynomial(std::span<std::unique_ptr<Expression>>&& coeffs);
     Polynomial(std::initializer_list<int> coeffs);
@@ -58,6 +53,13 @@ public:
     [[nodiscard]] auto GetExpression() const -> std::unique_ptr<Expression>;
     [[nodiscard]] auto degree() const -> int;
     [[nodiscard]] auto monic() const -> Polynomial;
+    [[nodiscard]] auto monic(int q) const -> Polynomial;
+
+
+    bool operator==(const std::unique_ptr<Expression>& copy) const
+    {
+        return expr_->Equals(*copy);
+    }
 
     // sketchy
     Polynomial operator+(const Polynomial& rhs) const
@@ -65,12 +67,6 @@ public:
         auto v = expr_ + rhs.expr_;
         return Polynomial {*v};
     }
-    bool operator==(const std::unique_ptr<Expression>& copy) const
-    {
-        return expr_->Equals(*copy);
-    }
-
-    // Polynomial operator-(const Polynomial& rhs);
     Polynomial operator-(const Polynomial& rhs) const
     {
         auto v = expr_ - rhs.expr_;
@@ -81,8 +77,11 @@ public:
         auto v = expr_ * rhs.expr_;
         return Polynomial {*v};
     }
-    // Polynomial operator*(const Polynomial& lhs, const Polynomial& rhs);
-    // Polynomial operator/(const Polynomial& lhs, const Polynomial& rhs);
+    Polynomial operator/(const Polynomial& rhs) const
+    {
+        auto v = expr_ / rhs.expr_;
+        return Polynomial {*v};
+    }
 
     static auto cantor_zassenhaus_equal_degree(Polynomial& f, int d, int q) -> std::vector<Polynomial>;
     auto AcceptInternal(Visitor& visitor) const -> any override;
@@ -131,6 +130,7 @@ public:
     }
 
     auto get_coefficients() const -> std::vector<std::unique_ptr<Expression>>;
+    auto LC() const -> std::unique_ptr<Expression>;
     auto expand() const -> Polynomial;
     Polynomial primitive_part() const;
 

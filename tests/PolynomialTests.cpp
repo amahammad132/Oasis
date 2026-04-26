@@ -30,7 +30,10 @@ namespace Oasis {
 auto synthetic_divide(Polynomial& dividend, Polynomial& divisor) -> std::pair<Polynomial, Polynomial>;
 auto synthetic_pseudo_divide(Polynomial& dividend, Polynomial& divisor) -> std::pair<Polynomial, Polynomial>;
 auto poly_gcd(Polynomial& a, Polynomial& b) -> Polynomial;
-auto poly_pow_mod(Polynomial& base, int exp, Polynomial& mod_poly, int modulus) -> Polynomial;
+auto poly_pow_mod(Polynomial base, int exp, Polynomial& mod_poly, int modulus) -> Polynomial;
+auto distinct_degree_factor(Polynomial& f, int q) -> std::vector<std::pair<Polynomial, int>>;
+auto poly_gcd_galois(Polynomial& a, Polynomial& b, const int q) -> Polynomial;
+auto auto_choose_prime_for_hensel(Polynomial& f_over_Q, int start = 3, int stop = 200) -> unsigned int;
 
 } // namespace Oasis
 
@@ -172,15 +175,9 @@ TEST_CASE("linear polynomial", "[factor]")
 TEST_CASE("quadratic polynomial", "[factor]")
 {
     auto poly = Oasis::Polynomial {1, 9, 24, -2, -99, -135, -54};
-    // auto poly = Polynomial {1, 45, 870, 9450, 63273, 269325, 723680, 1172700, 1026576, 362880};
-    // auto exa = poly.GetExpression();
-    // auto va = poly.get_coefficients();
-    // for (const auto& coeff : va) {
-    //     std::println("coeff: {}", coeff->Accept(serializer).value());
-    // }
     auto c = Oasis::Polynomial::factor_l(poly);
-    // (((x+-2)*((x+1)^2))*((x+3)^3))
 
+    // (((x+-2)*((x+1)^2))*((x+3)^3))
     Oasis::Multiply m{
         Oasis::Multiply {
             Oasis::Add {
@@ -355,5 +352,85 @@ TEST_CASE("poly_pow_mod works", "[polynomial][pow_mod]")
 
     auto ppm = Oasis::poly_pow_mod(base, exp, mod_poly, 7);
 
-    REQUIRE(CoefficientsAsIntegers(ppm) == std::vector<long> {4, 5});
+    REQUIRE(CoefficientsAsIntegers(ppm) == std::vector<long> {-3, -2});
+}
+
+// TODO: fix this
+TEST_CASE("distinct degree factorization works", "[polynomial][distinct degree factorization]")
+{
+    // Oasis::Polynomial p {2, 3};
+    Oasis::Polynomial p {1, 8, 22, 21};
+
+    auto ppm = Oasis::distinct_degree_factor(p, 5);
+
+
+
+    // auto fact2 = ppm.back();
+
+    // REQUIRE(fact1.first.degree() == 1);
+    // REQUIRE(fact2.first.degree() == 2);
+    REQUIRE(ppm.size() == 2);
+    REQUIRE(ppm[0].second == 1);
+    REQUIRE(ppm[1].second == 2);
+
+    auto fact1 = ppm[0].first;
+    auto fact1_eq = Oasis::Polynomial {1 , -2};
+    auto fact2 = ppm[1].first;
+    auto fact2_eq = Oasis::Polynomial {1 , 0, 2};
+    OASIS_CAPTURE_WITH_SERIALIZER(fact1);
+    OASIS_CAPTURE_WITH_SERIALIZER(fact2);
+
+    REQUIRE(CoefficientsAsIntegers(fact1) == std::vector<long> {1, -2});
+    REQUIRE(CoefficientsAsIntegers(fact2) == std::vector<long> {1, 0, 2});
+}
+
+TEST_CASE("polynomial gcd over finite field works", "[polynomial][gcd]")
+{
+    auto x = Oasis::Variable { "x" };
+    Oasis::Polynomial p1 {1, 8, 22, 21};
+    std::unique_ptr<Oasis::Expression> p2 = Oasis::Subtract { Oasis::Exponent{x, Oasis::Real{11}}, x}.Copy();
+    Oasis::Polynomial p2_gen = Oasis::Polynomial(*p2);
+
+    // auto gcd = Oasis::poly_gcd_galois(p2_gen, p1, 11);
+    auto gcd = Oasis::poly_gcd_galois(p1, p2_gen, 11);
+
+    REQUIRE(CoefficientsAsIntegers(gcd) == std::vector<long> {1, 3});
+}
+
+TEST_CASE("polynomial gcd over finite field works with positive root", "[polynomial][gcd]")
+{
+    Oasis::Polynomial p1 {-1, 4, -1};
+    Oasis::Polynomial p2 {3, -2};
+
+    auto gcd = Oasis::poly_gcd_galois(p1, p2, 11);
+
+    REQUIRE(CoefficientsAsIntegers(gcd) == std::vector<long> {1, 3});
+}
+
+TEST_CASE("polynomial gcd over finite field works with negative root", "[polynomial][gcd]")
+{
+    Oasis::Polynomial p1 {1, 2, 3, 1};
+    Oasis::Polynomial p2_gen {-2, -5};
+
+    auto gcd = Oasis::poly_gcd_galois(p1, p2_gen, 11);
+
+    REQUIRE(CoefficientsAsIntegers(gcd) == std::vector<long> {1, -3});
+}
+
+TEST_CASE("monic form of polynomial in a finite field", "[polynomial][finite field arithmetic]")
+{
+    Oasis::Polynomial poly {3, -2};
+    Oasis::Polynomial monic = poly.monic(11);
+
+    REQUIRE(CoefficientsAsIntegers(monic) == std::vector<long> {1, 3});
+}
+
+
+TEST_CASE("choosing prime value for polynomial factorization", "[polynomial][hensel prime]")
+{
+    Oasis::Polynomial poly {1, -4, -38, -63};
+
+    auto val = auto_choose_prime_for_hensel(poly);
+
+    REQUIRE(val == 5);
 }
