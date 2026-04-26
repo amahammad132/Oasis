@@ -19,6 +19,7 @@
 #include "Oasis/Variable.hpp"
 #include "catch2/internal/catch_list.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <set>
@@ -33,7 +34,7 @@ auto poly_gcd(Polynomial& a, Polynomial& b) -> Polynomial;
 auto poly_pow_mod(Polynomial base, int exp, Polynomial& mod_poly, int modulus) -> Polynomial;
 auto distinct_degree_factor(Polynomial& f, int q) -> std::vector<std::pair<Polynomial, int>>;
 auto poly_gcd_galois(Polynomial& a, Polynomial& b, const int q) -> Polynomial;
-auto auto_choose_prime_for_hensel(Polynomial& f_over_Q, int start = 3, int stop = 200) -> unsigned int;
+auto auto_choose_prime_for_hensel(Polynomial& f_over_Q, int start, int stop) -> unsigned int;
 
 } // namespace Oasis
 
@@ -433,4 +434,87 @@ TEST_CASE("choosing prime value for polynomial factorization", "[polynomial][hen
     auto val = auto_choose_prime_for_hensel(poly);
 
     REQUIRE(val == 5);
+}
+
+TEST_CASE("clear_denominators converts rational coefficients to integers", "[polynomial][hensel]")
+{
+    std::vector<std::unique_ptr<Oasis::Expression>> coefficients;
+    coefficients.emplace_back(Oasis::Divide<Oasis::Real> { Oasis::Real {1}, Oasis::Real {2} }.Copy());
+    coefficients.emplace_back(Oasis::Divide<Oasis::Real> { Oasis::Real {3}, Oasis::Real {2} }.Copy());
+    coefficients.emplace_back(Oasis::Real {1}.Copy());
+
+    Oasis::Polynomial polynomial {coefficients};
+    const auto [denominator, cleared] = clear_denominators(polynomial);
+
+    REQUIRE(denominator == 2);
+    REQUIRE(CoefficientsAsIntegers(cleared) == std::vector<long> {1, 3, 2});
+}
+
+TEST_CASE("extended gcd over F_p returns Bezout coefficients", "[polynomial][hensel]")
+{
+    Oasis::Polynomial a {1, 1};
+    Oasis::Polynomial b {1, 2};
+
+    auto [s, t, g] = Oasis::extended_gcd_poly_mod_p(a, b, 5);
+    auto bezout = Oasis::mod_poly_positive(((s * a).expand() + (t * b).expand()).expand(), 5);
+
+    REQUIRE(CoefficientsAsIntegers(Oasis::mod_poly_positive(g, 5)) == std::vector<long> {1});
+    REQUIRE(CoefficientsAsIntegers(bezout) == std::vector<long> {1});
+}
+
+TEST_CASE("hensel_lift_pair lifts two coprime factors", "[polynomial][hensel]")
+{
+    Oasis::Polynomial f {1, 8, 7};
+    Oasis::Polynomial a0 {1, 1};
+    Oasis::Polynomial b0 {1, 2};
+
+    auto [a, b] = Oasis::hensel_lift_pair(f, a0, b0, 5, 2);
+    auto centered_a = Oasis::center_polynomial_coefficients(a, 25);
+    auto centered_b = Oasis::center_polynomial_coefficients(b, 25);
+    auto product = ((centered_a * centered_b).expand());
+
+    REQUIRE(CoefficientsAsIntegers(centered_a) == std::vector<long> {1, 1});
+    REQUIRE(CoefficientsAsIntegers(centered_b) == std::vector<long> {1, 7});
+    REQUIRE(CoefficientsAsIntegers(product) == std::vector<long> {1, 8, 7});
+}
+
+TEST_CASE("lift_factors_to_Q reconstructs integer factors", "[polynomial][hensel]")
+{
+    Oasis::Polynomial f {2, 22, 62, 42};
+    std::vector<Oasis::Polynomial> modular_factors {
+        Oasis::Polynomial {1, 1},
+        Oasis::Polynomial {1, 2},
+        Oasis::Polynomial {1, 3}
+    };
+
+    const auto lifted = Oasis::lift_factors_to_Q(f, modular_factors, 5, 2);
+    const auto product = Oasis::multiply_polynomials(lifted);
+
+    REQUIRE(lifted.size() == 3);
+    REQUIRE(CoefficientsAsIntegers(product) == std::vector<long> {2, 22, 62, 42});
+}
+
+TEST_CASE("lift_factors_to_Q reconstructs a rational polynomial", "[polynomial][hensel]")
+{
+    std::vector<std::unique_ptr<Oasis::Expression>> coefficients;
+    coefficients.emplace_back(Oasis::Divide<Oasis::Real> { Oasis::Real {1}, Oasis::Real {2} }.Copy());
+    coefficients.emplace_back(Oasis::Divide<Oasis::Real> { Oasis::Real {11}, Oasis::Real {2} }.Copy());
+    coefficients.emplace_back(Oasis::Divide<Oasis::Real> { Oasis::Real {31}, Oasis::Real {2} }.Copy());
+    coefficients.emplace_back(Oasis::Divide<Oasis::Real> { Oasis::Real {21}, Oasis::Real {2} }.Copy());
+    Oasis::Polynomial f {coefficients};
+
+    std::vector<Oasis::Polynomial> modular_factors {
+        Oasis::Polynomial {1, 1},
+        Oasis::Polynomial {1, 2},
+        Oasis::Polynomial {1, 3}
+    };
+
+    const auto lifted = Oasis::lift_factors_to_Q(f, modular_factors, 5, 2);
+    const auto product = Oasis::multiply_polynomials(lifted);
+    const auto [product_denominator, product_cleared] = Oasis::clear_denominators(product);
+    const auto [original_denominator, original_cleared] = Oasis::clear_denominators(f);
+
+    REQUIRE(lifted.size() == 3);
+    REQUIRE(product_denominator == original_denominator);
+    REQUIRE(CoefficientsAsIntegers(product_cleared) == CoefficientsAsIntegers(original_cleared));
 }
