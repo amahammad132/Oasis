@@ -986,7 +986,7 @@ int main(int argc, char** argv)
 
 
     // x**6 + 9*x**5 + 24*x**4 - 2*x**3 - 99*x**2 - 135*x - 54
-    // vector<ExpressionPtr> g1;
+    vector<ExpressionPtr> g1;
     // g1.emplace_back(Real{1}.Copy());
     // g1.emplace_back(Real{9}.Copy());
     // g1.emplace_back(Real{24}.Copy());
@@ -994,14 +994,25 @@ int main(int argc, char** argv)
     // g1.emplace_back(Real{-99}.Copy());
     // g1.emplace_back(Real{-135}.Copy());
     // g1.emplace_back(Real{-54}.Copy());
-    // auto g1_combined = coeffs_to_polynomial(g1)->Copy();
 
+    // x**6 + 30*x**5 + 306*x**4 + 1481*x**3 + 3698*x**2 + 4576*x + 2208
+    g1.emplace_back(Real{1}.Copy());
+    g1.emplace_back(Real{30}.Copy());
+    g1.emplace_back(Real{306}.Copy());
+    g1.emplace_back(Real{1481}.Copy());
+    g1.emplace_back(Real{3698}.Copy());
+    g1.emplace_back(Real{4576}.Copy());
+    g1.emplace_back(Real{2208}.Copy());
+    auto g1_combined = coeffs_to_polynomial(g1)->Copy();
+
+    Polynomial g1_combined_p = Polynomial(*g1_combined);
     // auto output = yuns(g1_combined);
-    // int i = 0;
-    // for (ExpressionPtr& expptr : output) {
-    //     std::println("output[{}] = {}", i, expptr->Accept(serializer).value());
-    //     i++;
-    // }
+    auto output = Oasis::yuns(g1_combined_p);
+    int i = 0;
+    for (auto expptr : output) {
+        std::println("output[{}] = {}", i, expptr.Accept(serializer).value());
+        i++;
+    }
 
     // auto all_facts = factor(g1_combined);
     // for (const auto& fact : all_facts) {
@@ -1034,13 +1045,28 @@ int main(int argc, char** argv)
     // std::println("poly: {}", poly.Accept(serializer).value());
 
 
+    // this doesn't work -> make into test case
+    // auto poly = Multiply{Real{-3}, x}.Copy();
+    // auto poly_p = Polynomial(*poly);
+    // auto p2 = Polynomial {1, -2, -1};
+    // auto res = Oasis::synthetic_divide(poly_p, p2);
 
     // cantor-zassenhaus testing
-    auto poly = Polynomial {1, 5, 6};
-    auto result = Polynomial::cantor_zassenhaus_equal_degree(poly, 1, 7);
-    for (const auto& factor : result) {
-        std::println("factor: {}", factor.Accept(serializer).value());
-    }
+    // auto poly = Polynomial {1, 11, 40, 48}; // yuns only (has squares)
+    // auto poly = Polynomial {1, 5, 6}; // cantor-zassenhaus only (equal-degree)
+    // auto poly = Polynomial {1, 7, 17, 14}; // distinct-degree only
+    // auto poly = Polynomial {1, -1, -6, 10, -15, 23, -8, 12}; // yuns + distinct-degree
+    // auto poly = Polynomial {1, 13, 62, 128, 96}; // yuns + cantor-zassenhous
+    // auto poly = Polynomial {1, 30, 306, 1481, 3698, 4576, 2208}; // yuns + distinct-degree + cantor-zassenhaus (yuns fails!)
+    // int p = auto_choose_prime_for_hensel(poly, 3, 200);
+    // std::println("chosen prime: {}", p);
+    // auto result = Polynomial::cantor_zassenhaus_equal_degree(poly, 1, 7);
+    // auto result = Polynomial::factor(poly);
+    // auto pu = poly.GetExpression();
+    // auto re = yuns(pu);
+    // for (const auto& factor : re) {
+    //     std::println("factor: {}", factor->Accept(serializer).value());
+    // }
 
     return EXIT_SUCCESS;
 }

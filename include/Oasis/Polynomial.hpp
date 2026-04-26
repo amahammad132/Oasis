@@ -9,7 +9,11 @@
 #include "Expression.hpp"
 #include "Real.hpp"
 
+#include <optional>
 #include <span>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace Oasis {
 
@@ -137,6 +141,31 @@ public:
 private:
     std::unique_ptr<Expression> expr_;
 };
+
+std::pair<Polynomial, Polynomial> synthetic_divide(Polynomial& dividend, Polynomial& divisor);
+auto poly_mod(const Polynomial& p, int modulus) -> Polynomial;
+auto poly_mod(Polynomial& p, int modulus) -> Polynomial;
+auto polynomial_content(const Polynomial& polynomial) -> long long;
+auto primitive_part_with_content(const Polynomial& polynomial) -> std::pair<long long, Polynomial>;
+auto clear_denominators(const Polynomial& polynomial) -> std::pair<long long, Polynomial>;
+auto lift_factor_from_fp_to_zz(const Polynomial& g_fp, int p) -> Polynomial;
+auto mod_poly_positive(const Polynomial& g, int modulus) -> Polynomial;
+auto extended_gcd_poly_mod_p(const Polynomial& a, const Polynomial& b, int p) -> std::tuple<Polynomial, Polynomial, Polynomial>;
+auto multiply_polynomials(const std::vector<Polynomial>& polys, std::optional<int> modulus = std::nullopt) -> Polynomial;
+auto hensel_lift_pair(const Polynomial& f_int, const Polynomial& a0, const Polynomial& b0, int p, int k_target)
+    -> std::pair<Polynomial, Polynomial>;
+auto hensel_lift_list(const Polynomial& f_int, const std::vector<Polynomial>& fs_mod_p, int p, int k_target) -> std::vector<Polynomial>;
+auto center_polynomial_coefficients(const Polynomial& g, int modulus) -> Polynomial;
+auto lift_factors_to_Q(const Polynomial& f_over_Q, const std::vector<Polynomial>& factors_over_fp, int p,
+                       std::optional<int> k = std::nullopt) -> std::vector<Polynomial>;
+auto factor_mod_p(const Polynomial& f_over_Q, int p) -> std::vector<Polynomial>;
+auto factor_over_fp_and_lift_to_Q(const Polynomial& f_over_Q, int start = 3, int stop = 200,
+                                  std::optional<int> k = std::nullopt)
+    -> std::tuple<int, std::vector<Polynomial>, std::vector<Polynomial>>;
+auto factor_squarefree_over_Q(const Polynomial& f_over_Q, int start = 3, int stop = 200,
+                              std::optional<int> k = std::nullopt) -> std::vector<Polynomial>;
+auto auto_choose_prime_for_hensel(Polynomial& f, int start = 3, int stop = 200) -> unsigned int;
+auto yuns(Polynomial& f) -> std::list<Polynomial>;
 
 } // Oasis
 

@@ -40,6 +40,11 @@
 #include <random>
 
 namespace Oasis {
+auto modInversePrime(const long long a, const long long m) -> long long;
+auto poly_gcd_galois(Polynomial& a_orig, Polynomial& b_orig, int q) -> Polynomial;
+auto auto_choose_prime_for_hensel(Polynomial& f, int start, int stop) -> unsigned int;
+auto distinct_degree_factor(Polynomial& f, int q) -> std::vector<std::pair<Polynomial, int>>;
+
 namespace {
 
     auto CopyOrThrow(const Expression* expression) -> std::unique_ptr<Expression>
@@ -73,6 +78,389 @@ namespace {
         }
         std::format_to(std::back_inserter(res), "{}", (*it)->Accept(serializer).value());
         return res;
+    }
+
+    struct RationalCoefficient {
+        long long numerator {0};
+        long long denominator {1};
+    };
+
+    auto normalize_rational(RationalCoefficient value) -> RationalCoefficient
+    {
+        if (value.denominator == 0) {
+            throw std::runtime_error("Polynomial coefficient has zero denominator.");
+        }
+
+        if (value.denominator < 0) {
+            value.numerator *= -1;
+            value.denominator *= -1;
+        }
+
+        const auto gcd_value = std::gcd(std::llabs(value.numerator), std::llabs(value.denominator));
+        if (gcd_value == 0) {
+            return {0, 1};
+        }
+
+        value.numerator /= gcd_value;
+        value.denominator /= gcd_value;
+        return value;
+    }
+
+    auto positive_mod(const long long value, const long long modulus) -> long long
+    {
+        if (modulus <= 0) {
+            throw std::invalid_argument("Modulus must be positive.");
+        }
+
+        auto result = value % modulus;
+        if (result < 0) {
+            result += modulus;
+        }
+        return result;
+    }
+
+    auto trim_leading_zeros(std::vector<long long> coeffs) -> std::vector<long long>
+    {
+        auto first_non_zero = std::find_if(coeffs.begin(), coeffs.end(), [](const long long coefficient) {
+            return coefficient != 0;
+        });
+
+        if (first_non_zero == coeffs.end()) {
+            return {0};
+        }
+
+        coeffs.erase(coeffs.begin(), first_non_zero);
+        return coeffs;
+    }
+
+    auto is_zero_polynomial(const std::vector<long long>& coeffs) -> bool
+    {
+        return std::all_of(coeffs.begin(), coeffs.end(), [](const long long coefficient) {
+            return coefficient == 0;
+        });
+    }
+
+    auto make_coefficient_expression(const RationalCoefficient coefficient) -> std::unique_ptr<Expression>
+    {
+        const auto normalized = normalize_rational(coefficient);
+        if (normalized.denominator == 1) {
+            return Real { static_cast<double>(normalized.numerator) }.Copy();
+        }
+
+        return Divide { Real { static_cast<double>(normalized.numerator) }, Real { static_cast<double>(normalized.denominator) } }.Copy();
+    }
+
+    auto rational_from_double(const double value, const long long max_denominator = 1'000'000) -> RationalCoefficient
+    {
+        if (!std::isfinite(value)) {
+            throw std::runtime_error("Expected a finite polynomial coefficient.");
+        }
+
+        const auto nearest_integer = std::llround(value);
+        if (std::abs(value - static_cast<double>(nearest_integer)) < 1e-12) {
+            return {nearest_integer, 1};
+        }
+
+        const auto sign = value < 0 ? -1LL : 1LL;
+        auto x = std::abs(value);
+
+        long long h_prev_prev = 0;
+        long long h_prev = 1;
+        long long k_prev_prev = 1;
+        long long k_prev = 0;
+
+        for (int iteration = 0; iteration < 64; ++iteration) {
+            const auto integer_part = static_cast<long long>(std::floor(x));
+            const auto h = integer_part * h_prev + h_prev_prev;
+            const auto k = integer_part * k_prev + k_prev_prev;
+
+            if (k > max_denominator) {
+                break;
+            }
+
+            const auto approximation = static_cast<double>(h) / static_cast<double>(k);
+            if (std::abs(approximation - std::abs(value)) < 1e-12) {
+                return normalize_rational({sign * h, k});
+            }
+
+            const auto fractional_part = x - static_cast<double>(integer_part);
+            if (fractional_part < 1e-15) {
+                return normalize_rational({sign * h, k});
+            }
+
+            h_prev_prev = h_prev;
+            h_prev = h;
+            k_prev_prev = k_prev;
+            k_prev = k;
+            x = 1.0 / fractional_part;
+        }
+
+        throw std::runtime_error("Could not recover a rational coefficient from floating-point data.");
+    }
+
+    auto build_polynomial_from_integer_coefficients(const std::vector<long long>& coefficients) -> Polynomial
+    {
+        const auto trimmed = trim_leading_zeros(coefficients);
+        std::vector<std::unique_ptr<Expression>> expressions;
+        expressions.reserve(trimmed.size());
+        for (const auto coefficient : trimmed) {
+            expressions.emplace_back(Real { static_cast<double>(coefficient) }.Copy());
+        }
+        return Polynomial { expressions };
+    }
+
+    auto build_polynomial_from_rational_coefficients(const std::vector<RationalCoefficient>& coefficients) -> Polynomial
+    {
+        std::vector<std::unique_ptr<Expression>> expressions;
+        expressions.reserve(coefficients.size());
+        for (const auto coefficient : coefficients) {
+            expressions.emplace_back(make_coefficient_expression(coefficient));
+        }
+        return Polynomial { expressions };
+    }
+
+    auto extract_rational_coefficient(const Expression& expression) -> RationalCoefficient
+    {
+        if (auto rational_value = RecursiveCast<Divide<Real>>(expression); rational_value != nullptr) {
+            return normalize_rational({
+                std::llround(rational_value->GetMostSigOp().GetValue()),
+                std::llround(rational_value->GetLeastSigOp().GetValue())
+            });
+        }
+
+        if (auto real_value = RecursiveCast<Real>(expression); real_value != nullptr) {
+            return rational_from_double(real_value->GetValue());
+        }
+
+        SimplifyVisitor simplify_visitor {};
+        const auto simplified = expression.Accept(simplify_visitor).value();
+
+        if (auto rational_value = RecursiveCast<Divide<Real>>(*simplified); rational_value != nullptr) {
+            return normalize_rational({
+                std::llround(rational_value->GetMostSigOp().GetValue()),
+                std::llround(rational_value->GetLeastSigOp().GetValue())
+            });
+        }
+
+        if (auto real_value = RecursiveCast<Real>(*simplified); real_value != nullptr) {
+            return rational_from_double(real_value->GetValue());
+        }
+
+        throw std::runtime_error("Expected a polynomial with rational coefficients.");
+    }
+
+    auto rational_coefficients(const Polynomial& polynomial) -> std::vector<RationalCoefficient>
+    {
+        const auto coefficients = polynomial.get_coefficients();
+        std::vector<RationalCoefficient> result;
+        result.reserve(coefficients.size());
+        for (const auto& coefficient : coefficients) {
+            result.push_back(extract_rational_coefficient(*coefficient));
+        }
+        return result;
+    }
+
+    auto integer_coefficients(const Polynomial& polynomial) -> std::vector<long long>
+    {
+        const auto coefficients = rational_coefficients(polynomial);
+        std::vector<long long> result;
+        result.reserve(coefficients.size());
+        for (const auto coefficient : coefficients) {
+            if (coefficient.denominator != 1) {
+                throw std::runtime_error("Expected integer polynomial coefficients.");
+            }
+            result.push_back(coefficient.numerator);
+        }
+        return trim_leading_zeros(result);
+    }
+
+    auto scale_polynomial_by_ground(const Polynomial& polynomial, const long long factor) -> Polynomial
+    {
+        auto coefficients = integer_coefficients(polynomial);
+        for (auto& coefficient : coefficients) {
+            coefficient *= factor;
+        }
+        return build_polynomial_from_integer_coefficients(coefficients);
+    }
+
+    auto divide_polynomial_by_ground(const Polynomial& polynomial, const long long divisor) -> Polynomial
+    {
+        if (divisor == 0) {
+            throw std::invalid_argument("Cannot divide polynomial by zero.");
+        }
+
+        auto coefficients = integer_coefficients(polynomial);
+        for (auto& coefficient : coefficients) {
+            if (coefficient % divisor != 0) {
+                throw std::runtime_error("Polynomial coefficients are not divisible by the requested integer.");
+            }
+            coefficient /= divisor;
+        }
+        return build_polynomial_from_integer_coefficients(coefficients);
+    }
+
+    auto scale_polynomial_by_rational(const Polynomial& polynomial, const long long numerator, const long long denominator) -> Polynomial
+    {
+        const auto normalized_scalar = normalize_rational({numerator, denominator});
+        const auto coefficients = rational_coefficients(polynomial);
+
+        std::vector<RationalCoefficient> scaled;
+        scaled.reserve(coefficients.size());
+        for (const auto coefficient : coefficients) {
+            scaled.push_back(normalize_rational({
+                coefficient.numerator * normalized_scalar.numerator,
+                coefficient.denominator * normalized_scalar.denominator
+            }));
+        }
+        return build_polynomial_from_rational_coefficients(scaled);
+    }
+
+    auto polynomials_have_same_integer_coefficients(const Polynomial& lhs, const Polynomial& rhs) -> bool
+    {
+        return integer_coefficients(lhs) == integer_coefficients(rhs);
+    }
+
+    auto polynomial_is_zero(const Polynomial& polynomial) -> bool
+    {
+        return is_zero_polynomial(integer_coefficients(polynomial));
+    }
+
+    auto polynomial_is_one_mod_p(const Polynomial& polynomial, const int modulus) -> bool
+    {
+        const auto coefficients = integer_coefficients(mod_poly_positive(polynomial, modulus));
+        return coefficients.size() == 1 && positive_mod(coefficients.front(), modulus) == 1;
+    }
+
+    auto monic_mod_prime_coefficients(std::vector<long long> coefficients, const int modulus) -> std::vector<long long>
+    {
+        coefficients = trim_leading_zeros(std::move(coefficients));
+        if (is_zero_polynomial(coefficients)) {
+            return coefficients;
+        }
+
+        const auto leading = positive_mod(coefficients.front(), modulus);
+        const auto inverse = positive_mod(modInversePrime(leading, modulus), modulus);
+        for (auto& coefficient : coefficients) {
+            coefficient = positive_mod(coefficient * inverse, modulus);
+        }
+        return trim_leading_zeros(std::move(coefficients));
+    }
+
+    auto add_coefficients_mod(const std::vector<long long>& lhs, const std::vector<long long>& rhs, const int modulus) -> std::vector<long long>
+    {
+        const auto max_size = std::max(lhs.size(), rhs.size());
+        std::vector<long long> result(max_size, 0);
+
+        const auto lhs_offset = static_cast<int>(max_size - lhs.size());
+        const auto rhs_offset = static_cast<int>(max_size - rhs.size());
+
+        for (size_t i = 0; i < max_size; ++i) {
+            long long coefficient = 0;
+            if (i >= static_cast<size_t>(lhs_offset)) {
+                coefficient += lhs[i - lhs_offset];
+            }
+            if (i >= static_cast<size_t>(rhs_offset)) {
+                coefficient += rhs[i - rhs_offset];
+            }
+            result[i] = positive_mod(coefficient, modulus);
+        }
+
+        return trim_leading_zeros(std::move(result));
+    }
+
+    auto subtract_coefficients_mod(const std::vector<long long>& lhs, const std::vector<long long>& rhs, const int modulus) -> std::vector<long long>
+    {
+        const auto max_size = std::max(lhs.size(), rhs.size());
+        std::vector<long long> result(max_size, 0);
+
+        const auto lhs_offset = static_cast<int>(max_size - lhs.size());
+        const auto rhs_offset = static_cast<int>(max_size - rhs.size());
+
+        for (size_t i = 0; i < max_size; ++i) {
+            long long coefficient = 0;
+            if (i >= static_cast<size_t>(lhs_offset)) {
+                coefficient += lhs[i - lhs_offset];
+            }
+            if (i >= static_cast<size_t>(rhs_offset)) {
+                coefficient -= rhs[i - rhs_offset];
+            }
+            result[i] = positive_mod(coefficient, modulus);
+        }
+
+        return trim_leading_zeros(std::move(result));
+    }
+
+    auto multiply_coefficients_mod(const std::vector<long long>& lhs, const std::vector<long long>& rhs, const int modulus) -> std::vector<long long>
+    {
+        if (is_zero_polynomial(lhs) || is_zero_polynomial(rhs)) {
+            return {0};
+        }
+
+        std::vector<long long> result(lhs.size() + rhs.size() - 1, 0);
+        for (size_t i = 0; i < lhs.size(); ++i) {
+            for (size_t j = 0; j < rhs.size(); ++j) {
+                result[i + j] = positive_mod(result[i + j] + lhs[i] * rhs[j], modulus);
+            }
+        }
+
+        return trim_leading_zeros(std::move(result));
+    }
+
+    auto divide_coefficients_mod(std::vector<long long> dividend, const std::vector<long long>& divisor, const int modulus)
+        -> std::pair<std::vector<long long>, std::vector<long long>>
+    {
+        dividend = trim_leading_zeros(std::move(dividend));
+        const auto trimmed_divisor = trim_leading_zeros(divisor);
+
+        if (is_zero_polynomial(trimmed_divisor)) {
+            throw std::invalid_argument("Cannot divide by the zero polynomial modulo p.");
+        }
+
+        if (is_zero_polynomial(dividend) || dividend.size() < trimmed_divisor.size()) {
+            return {{0}, dividend};
+        }
+
+        std::vector<long long> quotient(dividend.size() - trimmed_divisor.size() + 1, 0);
+        auto remainder = dividend;
+        const auto divisor_inverse = positive_mod(modInversePrime(positive_mod(trimmed_divisor.front(), modulus), modulus), modulus);
+
+        while (!is_zero_polynomial(remainder) && remainder.size() >= trimmed_divisor.size()) {
+            const auto shift = static_cast<int>(remainder.size() - trimmed_divisor.size());
+            const auto factor = positive_mod(remainder.front() * divisor_inverse, modulus);
+            const auto quotient_index = static_cast<int>(quotient.size() - 1 - shift);
+            quotient[quotient_index] = factor;
+
+            for (size_t i = 0; i < trimmed_divisor.size(); ++i) {
+                remainder[i] = positive_mod(remainder[i] - factor * trimmed_divisor[i], modulus);
+            }
+            remainder = trim_leading_zeros(std::move(remainder));
+        }
+
+        return {trim_leading_zeros(std::move(quotient)), trim_leading_zeros(std::move(remainder))};
+    }
+
+    auto coefficients_modulo_positive(const Polynomial& polynomial, const int modulus) -> std::vector<long long>
+    {
+        auto coefficients = integer_coefficients(polynomial);
+        for (auto& coefficient : coefficients) {
+            coefficient = positive_mod(coefficient, modulus);
+        }
+        return trim_leading_zeros(std::move(coefficients));
+    }
+
+    auto monic_modulo_polynomial(const Polynomial& polynomial, const int modulus) -> Polynomial
+    {
+        return build_polynomial_from_integer_coefficients(monic_mod_prime_coefficients(coefficients_modulo_positive(polynomial, modulus), modulus));
+    }
+
+    auto remainder_modulo_polynomial(const Polynomial& dividend, const Polynomial& divisor, const int modulus) -> Polynomial
+    {
+        const auto remainder = divide_coefficients_mod(
+            coefficients_modulo_positive(dividend, modulus),
+            coefficients_modulo_positive(divisor, modulus),
+            modulus
+        ).second;
+        return build_polynomial_from_integer_coefficients(remainder);
     }
 
 } // namespace
@@ -500,8 +888,20 @@ auto Polynomial::expand() const -> Polynomial
                 }
             }
 
+            // fallback if vector is too small for elements to be added together
+            // it's probably better to make a helper function for BuildFromVector<T>() that
+            // works with edge cases (empty input and size 1 input), or change BuildFromVector
+            // (if there are no side effects to that change)
+            if (result.size() == 1) {
+                auto rp = result[0]->Accept(simplify_visitor).value();
+                return Polynomial(*rp);
+            }
+            if (result.empty()) {
+                auto expr_simpl = expr_->Accept(simplify_visitor).value();
+                return expr_simpl->Copy();
+            }
             std::unique_ptr<Expression> combined = BuildFromVector<Add>(result);
-            std::println("expanded polynom: {}", combined->Accept(serializer).value());
+            // std::println("expanded polynom: {}", combined->Accept(serializer).value());
             return combined;
         }
     }
@@ -514,11 +914,12 @@ auto Polynomial::expand() const -> Polynomial
             if (exponent->Is<Real>()) {
                 auto exponent_double = RecursiveCast<Real>(*exponent)->GetValue();
                 auto exponent_int = static_cast<int>(exponent_double);
-                if (std::abs(exponent_double - exponent_int) < std::numeric_limits<float>::epsilon()) {
+                if (exponent_int > 1 && std::abs(exponent_double - exponent_int) < std::numeric_limits<float>::epsilon()) {
                     std::vector<std::unique_ptr<Expression>> result;
                     for (int i = 0; i < exponent_int; i++) {
                         result.emplace_back(base->Copy());
                     }
+                    // std::println("result.size() = {}", result.size());
                     auto expanded = Oasis::BuildFromVector<Multiply>(result)->Generalize();
                     InFixSerializer serializer;
 
@@ -541,11 +942,22 @@ auto Polynomial::expand() const -> Polynomial
 int multi_gcd(const std::vector<std::unique_ptr<Expression>>& numbers) {
     if (numbers.empty()) return 0;
 
-    int result = static_cast<int>(RecursiveCast<Real>(*numbers.front())->GetValue());
+    // int result = static_cast<int>(RecursiveCast<Real>(*numbers.front())->GetValue());
+    // for (auto it = std::next(numbers.begin()); it != numbers.end(); ++it) {
+    //     result = std::gcd(result, static_cast<int>(RecursiveCast<Real>(**it)->GetValue()));
+    // }
+    // return result;
+
+    double result_a = RecursiveCast<Real>(*numbers.front())->GetValue();
+    auto result = static_cast<long long>(result_a);
+    std::println("first number: {} -> {}", result_a, result);
     for (auto it = std::next(numbers.begin()); it != numbers.end(); ++it) {
-        result = std::gcd(result, static_cast<int>(RecursiveCast<Real>(**it)->GetValue()));
+        auto va = RecursiveCast<Real>(**it)->GetValue();
+        auto vb =  static_cast<long long>(va);
+        std::println("double to long {} -> {}", va, vb);
+        result = std::gcd(result, vb);
     }
-    return result;
+    return static_cast<int>(result);
 }
 
 // get the primitive part of a polynomial (divide the polynomial by its content)
@@ -558,7 +970,7 @@ Polynomial Polynomial::primitive_part() const
     InFixSerializer serializer;
     // auto coeffs = all_coeffs(poly->Copy());
     auto coeffs = get_coefficients();
-    std::println("PRIMITIVE_PART of {}: coeffs size: {}", expr_->Accept(serializer).value(), coeffs.size());
+    std::println("PRIMITIVE_PART of {}: coeffs size: {}, coeffs: {}", expr_->Accept(serializer).value(), coeffs.size(), print_expr_list(coeffs));
     std::vector<std::unique_ptr<Expression>> new_coeffs;
     new_coeffs.reserve(coeffs.size());
 
@@ -569,7 +981,6 @@ Polynomial Polynomial::primitive_part() const
     // prevent a divide by zero if the GCD is zero
     if (gcd == 0) return expr_->Copy();
 
-    std::println("PRIMITIVE_PART: gcd = {}", gcd);
     for (std::unique_ptr<Expression>& coeff : coeffs) {
         // coeff = (coeff / gcd);
         // coeff = coeff->Accept(simplify_visitor);
@@ -592,8 +1003,7 @@ std::pair<std::vector<std::unique_ptr<Expression>>, std::vector<std::unique_ptr<
     std::vector<std::unique_ptr<Expression>> out {}; // Copy the dividend
     for (const auto& d : dividend) {
         out.emplace_back(d->Copy());
-        // std::println("out added: {}", d->Accept(serializer).value());
-        // std::println("out val: {}", d->Accept(serializer).value());
+        std::println("out added: {}", d->Accept(serializer).value());
     }
 
     // std::println("out: {}", out);
@@ -621,7 +1031,7 @@ std::pair<std::vector<std::unique_ptr<Expression>>, std::vector<std::unique_ptr<
     std::vector<std::unique_ptr<Expression>> remainder {};
 
     int sep = out.size() - (divisor.size() - 1);
-    // std::println("sep: {}", sep);
+    std::println("sep: {}", sep);
     for (int i = 0; i < sep; i++) {
         quotient.emplace_back(out[i]->Accept(simplify_visitor).value());
         // auto out_i_copy = out[i]->Copy();
@@ -651,10 +1061,17 @@ std::pair<Polynomial, Polynomial> synthetic_divide(Polynomial& dividend, Polynom
 {
     SimplifyVisitor simplify_visitor {};
     InFixSerializer serializer;
-    std::println("synthetic_divide({}, {})", dividend.Accept(serializer).value(), divisor.Accept(serializer).value() );
+    std::println("synthetic_didvide({}, {})", dividend.Accept(serializer).value(), divisor.Accept(serializer).value() );
+
+    auto ex_1 = dividend.expand();
+    std::println("ex_1: {}", ex_1.Accept(serializer).value());
+    auto ex_2 = ex_1.get_coefficients();
+    std::println("ex_2: {}", print_expr_list(ex_2));
 
     auto dividend_coeffs = dividend.expand().get_coefficients();
+    std::println("dividend_coeffs: {}", print_expr_list(dividend_coeffs));
     auto divisor_coeffs = divisor.expand().get_coefficients();
+    std::println("divisor_coeffs: {}", print_expr_list(divisor_coeffs));
     // auto dividend_coeffs = dividend.expand().Accept(simplify_visitor).value();
 
     // std::println("number of dividend coeffs: {}", dividend_coeffs.size());
@@ -684,8 +1101,14 @@ std::pair<Polynomial, Polynomial> synthetic_divide(Polynomial& dividend, Polynom
     // }
     // std::println("copy complete");
 
+    // auto new_result_quotient = old_result.first.empty()
+    //     ? build_polynomial_from_integer_coefficients({0})
+    //     : Polynomial(old_result.first);
     auto new_result_quotient = Polynomial(old_result.first);
     // std::println("new result quotient: {}", new_result_quotient.Accept(serializer).value());
+    // auto new_result_remainder = old_result.second.empty()
+    //     ? build_polynomial_from_integer_coefficients({0})
+    //     : Polynomial(old_result.second);
     auto new_result_remainder = Polynomial(old_result.second);
     // std::unique_ptr<Expression> new_result_remainder = new_result_quotient->Copy();
     // std::println("size(new_result_quotient) = {}, size(new_result_remainder) = {}", ne)
@@ -778,8 +1201,305 @@ long long modInversePrime(const long long a, const long long m) {
     return tmp;
 }
 
+auto polynomial_content(const Polynomial& polynomial) -> long long
+{
+    const auto coefficients = integer_coefficients(polynomial);
+    long long content = 0;
+    for (const auto coefficient : coefficients) {
+        content = std::gcd(content, std::llabs(coefficient));
+    }
+    return content;
+}
 
+auto primitive_part_with_content(const Polynomial& polynomial) -> std::pair<long long, Polynomial>
+{
+    const auto content = polynomial_content(polynomial);
+    if (content == 0) {
+        return {0, polynomial.Copy_P()};
+    }
+    return {content, divide_polynomial_by_ground(polynomial, content)};
+}
 
+auto clear_denominators(const Polynomial& polynomial) -> std::pair<long long, Polynomial>
+{
+    const auto coefficients = rational_coefficients(polynomial);
+    long long denominator_lcm = 1;
+    for (const auto coefficient : coefficients) {
+        denominator_lcm = std::lcm(denominator_lcm, coefficient.denominator);
+    }
+
+    std::vector<long long> cleared;
+    cleared.reserve(coefficients.size());
+    for (const auto coefficient : coefficients) {
+        cleared.push_back(coefficient.numerator * (denominator_lcm / coefficient.denominator));
+    }
+
+    return {denominator_lcm, build_polynomial_from_integer_coefficients(cleared)};
+}
+
+auto poly_mod(const Polynomial& p, int modulus) -> Polynomial
+{
+    InFixSerializer serializer;
+    std::println("poly_mod({}, {})", p.Accept(serializer).value(), modulus);
+    auto coeffs = p.get_coefficients();
+    std::vector<std::unique_ptr<Expression>> coeffs_mod;
+    coeffs_mod.reserve(coeffs.size());
+    for (const auto& coeff : coeffs) {
+        std::println("coeff in poly_mod: {}", coeff->Accept(serializer).value());
+        const auto value = std::llround(RecursiveCast<Real>(*coeff)->GetValue());
+        coeffs_mod.emplace_back(Real { static_cast<double>(mod(value, modulus)) }.Copy());
+    }
+    return Polynomial { coeffs_mod };
+}
+
+auto poly_mod(Polynomial& p, int modulus) -> Polynomial
+{
+    return poly_mod(static_cast<const Polynomial&>(p), modulus);
+}
+
+auto poly_mod_orig(Polynomial& p, int modulus) -> Polynomial
+{
+    InFixSerializer serializer {};
+    auto coeffs = p.get_coefficients();
+    std::vector<std::unique_ptr<Expression>> coeffs_mod;
+    for (const auto& coeff : coeffs) {
+        auto t = RecursiveCast<Real>(*coeff)->GetValue();
+        // std::println("coeff: {} == {}", t, static_cast<long>(t) % modulus);
+        // coeffs_mod.emplace_back(Real{ static_cast<double>(static_cast<long>(RecursiveCast<Real>(*coeff)->GetValue()) % modulus) }.Copy());
+        coeffs_mod.emplace_back(Real{ static_cast<double>(mod(static_cast<long>(t), modulus)) }.Copy());
+    }
+    return Polynomial {coeffs_mod};
+}
+
+auto lift_factor_from_fp_to_zz(const Polynomial& g_fp, int p) -> Polynomial
+{
+    return build_polynomial_from_integer_coefficients(coefficients_modulo_positive(g_fp, p));
+}
+
+auto mod_poly_positive(const Polynomial& g, int modulus) -> Polynomial
+{
+    return build_polynomial_from_integer_coefficients(coefficients_modulo_positive(g, modulus));
+}
+
+auto extended_gcd_poly_mod_p(const Polynomial& a, const Polynomial& b, int p) -> std::tuple<Polynomial, Polynomial, Polynomial>
+{
+    auto A = coefficients_modulo_positive(a, p);
+    auto B = coefficients_modulo_positive(b, p);
+
+    std::vector<long long> s0 {1}, s1 {0};
+    std::vector<long long> t0 {0}, t1 {1};
+
+    while (!is_zero_polynomial(B)) {
+        const auto [q, r] = divide_coefficients_mod(A, B, p);
+        A = B;
+        B = r;
+
+        const auto next_s = subtract_coefficients_mod(s0, multiply_coefficients_mod(q, s1, p), p);
+        const auto next_t = subtract_coefficients_mod(t0, multiply_coefficients_mod(q, t1, p), p);
+        s0 = s1;
+        s1 = next_s;
+        t0 = t1;
+        t1 = next_t;
+    }
+
+    if (is_zero_polynomial(A)) {
+        throw std::runtime_error("Unexpected zero gcd in extended polynomial gcd modulo p.");
+    }
+
+    const auto inverse_lc = positive_mod(modInversePrime(positive_mod(A.front(), p), p), p);
+    for (auto& coefficient : s0) {
+        coefficient = positive_mod(coefficient * inverse_lc, p);
+    }
+    for (auto& coefficient : t0) {
+        coefficient = positive_mod(coefficient * inverse_lc, p);
+    }
+    for (auto& coefficient : A) {
+        coefficient = positive_mod(coefficient * inverse_lc, p);
+    }
+
+    return {
+        build_polynomial_from_integer_coefficients(trim_leading_zeros(std::move(s0))),
+        build_polynomial_from_integer_coefficients(trim_leading_zeros(std::move(t0))),
+        build_polynomial_from_integer_coefficients(trim_leading_zeros(std::move(A)))
+    };
+}
+
+auto multiply_polynomials(const std::vector<Polynomial>& polys, std::optional<int> modulus) -> Polynomial
+{
+    Polynomial result {1};
+    for (const auto& polynomial : polys) {
+        result = (result * polynomial).expand();
+        if (modulus.has_value()) {
+            result = mod_poly_positive(result, *modulus);
+        }
+    }
+    return result;
+}
+
+auto hensel_lift_pair(const Polynomial& f_int, const Polynomial& a0, const Polynomial& b0, int p, int k_target)
+    -> std::pair<Polynomial, Polynomial>
+{
+    auto a = lift_factor_from_fp_to_zz(monic_modulo_polynomial(a0, p), p);
+    auto b = lift_factor_from_fp_to_zz(monic_modulo_polynomial(b0, p), p);
+
+    auto [s, t, g] = extended_gcd_poly_mod_p(a, b, p);
+    if (g.degree() != 0 || !polynomial_is_one_mod_p(g, p)) {
+        throw std::runtime_error("Factors are not coprime modulo p; cannot Hensel lift.");
+    }
+
+    s = lift_factor_from_fp_to_zz(s, p);
+    t = lift_factor_from_fp_to_zz(t, p);
+
+    long long m = p;
+    for (int current_k = 1; current_k < k_target; ++current_k) {
+        auto product = (a * b).expand();
+        auto diff = (f_int - product).expand();
+        auto diff_mod = mod_poly_positive(diff, static_cast<int>(m * p));
+        auto e = divide_polynomial_by_ground(diff_mod, m);
+
+        const auto e_fp = mod_poly_positive(e, p);
+        const auto da_fp = remainder_modulo_polynomial(
+            multiply_polynomials({mod_poly_positive(t, p), e_fp}, p),
+            mod_poly_positive(a, p),
+            p
+        );
+        const auto db_fp = remainder_modulo_polynomial(
+            multiply_polynomials({mod_poly_positive(s, p), e_fp}, p),
+            mod_poly_positive(b, p),
+            p
+        );
+
+        const auto da = scale_polynomial_by_ground(lift_factor_from_fp_to_zz(da_fp, p), m);
+        const auto db = scale_polynomial_by_ground(lift_factor_from_fp_to_zz(db_fp, p), m);
+
+        a = mod_poly_positive((a + da).expand(), static_cast<int>(m * p));
+        b = mod_poly_positive((b + db).expand(), static_cast<int>(m * p));
+        m *= p;
+    }
+
+    return {a, b};
+}
+
+auto hensel_lift_list(const Polynomial& f_int, const std::vector<Polynomial>& fs_mod_p, int p, int k_target) -> std::vector<Polynomial>
+{
+    if (fs_mod_p.empty()) {
+        return {};
+    }
+
+    const auto modulus = static_cast<int>(IntPower(p, k_target));
+    if (fs_mod_p.size() == 1) {
+        return {mod_poly_positive(f_int, modulus)};
+    }
+
+    std::vector<Polynomial> lifted;
+    lifted.reserve(fs_mod_p.size());
+
+    auto target = f_int.Copy_P();
+    std::vector<Polynomial> remaining = fs_mod_p;
+
+    while (remaining.size() > 1) {
+        const auto a0 = monic_modulo_polynomial(remaining.front(), p);
+        const std::vector<Polynomial> tail(remaining.begin() + 1, remaining.end());
+        const auto b0 = monic_modulo_polynomial(multiply_polynomials(tail, p), p);
+        auto [A, B] = hensel_lift_pair(target, a0, b0, p, k_target);
+        lifted.push_back(mod_poly_positive(A, modulus));
+        target = mod_poly_positive(B, modulus);
+        remaining.erase(remaining.begin());
+    }
+
+    lifted.push_back(mod_poly_positive(target, modulus));
+    return lifted;
+}
+
+auto center_polynomial_coefficients(const Polynomial& g, int modulus) -> Polynomial
+{
+    auto coefficients = coefficients_modulo_positive(g, modulus);
+    for (auto& coefficient : coefficients) {
+        if (coefficient > modulus / 2) {
+            coefficient -= modulus;
+        }
+    }
+    return build_polynomial_from_integer_coefficients(coefficients);
+}
+
+auto lift_factors_to_Q(const Polynomial& f_over_Q, const std::vector<Polynomial>& factors_over_fp, int p, std::optional<int> k)
+    -> std::vector<Polynomial>
+{
+    const auto [denominator, f_over_z] = clear_denominators(f_over_Q);
+    const auto [content, f_primitive] = primitive_part_with_content(f_over_z);
+
+    if (f_primitive.degree() <= 0) {
+        return {f_over_Q.Copy_P()};
+    }
+
+    if (factors_over_fp.empty()) {
+        throw std::invalid_argument("Need at least one modular factor to lift.");
+    }
+
+    std::vector<Polynomial> modular_factors;
+    modular_factors.reserve(factors_over_fp.size());
+    for (const auto& factor : factors_over_fp) {
+        modular_factors.push_back(monic_modulo_polynomial(factor, p));
+    }
+
+    const auto modular_product = monic_modulo_polynomial(multiply_polynomials(modular_factors, p), p);
+    const auto primitive_mod_p = monic_modulo_polynomial(f_primitive, p);
+    if (!polynomials_have_same_integer_coefficients(modular_product, primitive_mod_p)) {
+        throw std::invalid_argument("Provided factors do not multiply to f mod p.");
+    }
+
+    if (!k.has_value()) {
+        const auto coefficients = integer_coefficients(f_primitive);
+        long long max_abs_coefficient = 0;
+        for (const auto coefficient : coefficients) {
+            max_abs_coefficient = std::max(max_abs_coefficient, std::llabs(coefficient));
+        }
+
+        const auto bound = std::max<long long>(2, (1LL << f_primitive.degree()) * max_abs_coefficient);
+        long long pk = p;
+        int lift_exponent = 1;
+        while (pk <= 2 * bound) {
+            pk *= p;
+            ++lift_exponent;
+        }
+        k = lift_exponent;
+    }
+
+    auto lifted = hensel_lift_list(f_primitive, modular_factors, p, *k);
+    const auto modulus = static_cast<int>(IntPower(p, *k));
+    for (auto& factor : lifted) {
+        factor = center_polynomial_coefficients(factor, modulus);
+    }
+
+    std::vector<Polynomial> exact_integer_factors;
+    exact_integer_factors.reserve(lifted.size());
+    auto remaining = f_primitive.Copy_P();
+    for (const auto& factor : lifted) {
+        auto [factor_content, primitive_factor] = primitive_part_with_content(factor);
+        if (factor_content == 0) {
+            primitive_factor = factor.Copy_P();
+        }
+        const auto normalized_factor = primitive_factor.monic();
+
+        auto remaining_copy = remaining.Copy_P();
+        auto normalized_copy = normalized_factor.Copy_P();
+        auto [quotient, remainder] = synthetic_divide(remaining_copy, normalized_copy);
+        if (!polynomial_is_zero(remainder)) {
+            exact_integer_factors.push_back(factor);
+            continue;
+        }
+
+        exact_integer_factors.push_back(normalized_factor);
+        remaining = quotient.monic();
+    }
+
+    if (exact_integer_factors.empty()) {
+        exact_integer_factors = std::move(lifted);
+    }
+
+    exact_integer_factors.front() = scale_polynomial_by_rational(exact_integer_factors.front(), content, denominator);
+    return exact_integer_factors;
+}
 
 // find the monic form over the finite-field of order q (GF(q)), where q is a prime number
 // assuming polynomial has integer coefficients
@@ -856,8 +1576,14 @@ std::pair<Polynomial, Polynomial> synthetic_pseudo_divide(Polynomial& dividend, 
     // }
     // std::println("copy complete");
 
+    // auto new_result_quotient = old_result.first.empty()
+    //     ? build_polynomial_from_integer_coefficients({0})
+    //     : Polynomial(old_result.first);
     auto new_result_quotient = Polynomial(old_result.first);
     std::println("new result quotient: {}", new_result_quotient.Accept(serializer).value());
+    // auto new_result_remainder = old_result.second.empty()
+    //     ? build_polynomial_from_integer_coefficients({0})
+    //     : Polynomial(old_result.second);
     auto new_result_remainder = Polynomial(old_result.second);
     // std::unique_ptr<Expression> new_result_remainder = new_result_quotient->Copy();
     // std::println("size(new_result_quotient) = {}, size(new_result_remainder) = {}", ne)
@@ -956,7 +1682,7 @@ auto poly_gcd(Polynomial& a, Polynomial& b) -> Polynomial
     return poly_gcd(b, rem);
 }
 
-auto yuns(Polynomial& f)
+auto yuns(Polynomial& f) -> std::list<Polynomial>
 {
     SimplifyVisitor simplify_visitor {};
     // InFixSerializer serializer {};
@@ -997,7 +1723,10 @@ auto yuns(Polynomial& f)
         std::println("getting b_i");
         auto b_i = synthetic_divide(b.back(), a_i).first;
         std::println("getting c_i");
-        auto c_i = synthetic_divide(d.back(), a_i).first;
+        auto c_i = Polynomial {0};
+        if (!polynomial_is_zero(d.back())) {
+            c_i = synthetic_divide(d.back(), a_i).first;
+        }
         std::println("getting d_i");
         auto d_i = c_i - b_i.Differentiate(x);
 
@@ -1016,12 +1745,11 @@ auto yuns(Polynomial& f)
     return a;
 }
 
-// Polynomial factorization using Yun's Algorithm.
-// Major limitation: only works on square-free polynomials (e.g. (x+2)*(x+3)^2*(x+5)^3) )
-auto Polynomial::factor(Polynomial& f) -> std::list<Polynomial>
+/*
+auto yuns_factor_only(Polynomial& f) -> std::list<Polynomial>
 {
     InFixSerializer serializer {};
-    auto val = f.expr_->Accept(serializer).value();
+    auto val = f.Accept(serializer).value();
     std::println("val: {}", val);
     std::list<std::list<Polynomial>> all_yuns_runs;
     auto result_list_1 = yuns(f);
@@ -1055,6 +1783,107 @@ auto Polynomial::factor(Polynomial& f) -> std::list<Polynomial>
     }
 
     return res;
+} */
+
+auto factor_mod_p(const Polynomial& f_over_Q, int p) -> std::vector<Polynomial>
+{
+    auto [denominator, f_over_z] = clear_denominators(f_over_Q);
+    static_cast<void>(denominator);
+
+    auto f_fp = poly_mod(f_over_z, p);
+    if (polynomial_is_zero(f_fp)) {
+        return {f_fp};
+    }
+    if (f_fp.degree() <= 0) {
+        return {f_fp.monic(p)};
+    }
+
+    Variable x {"x"};
+    auto f_fp_prime = f_fp.Differentiate(x);
+    if (!(poly_gcd_galois(f_fp, f_fp_prime, p) == Real {1}.Copy())) {
+        throw std::runtime_error(std::format("f mod {} is not squarefree; choose a different p.", p));
+    }
+
+    f_fp = f_fp.monic(p);
+    auto blocks = distinct_degree_factor(f_fp, p);
+    std::println("DDF complete!");
+
+    InFixSerializer serializer {};
+    std::vector<Polynomial> irreducibles;
+    for (auto& [block, degree] : blocks) {
+        auto block_monic = block.monic(p);
+        std::println("running cantor zassenhaus on {} with degree {}, p = {}", block_monic.Accept(serializer).value(), degree, p);
+        auto equal_degree_factors = Polynomial::cantor_zassenhaus_equal_degree(block_monic, degree, p);
+        std::println("cantor zassenhaus iteration complete!");
+        for (auto& factor : equal_degree_factors) {
+            irreducibles.emplace_back(factor.monic(p));
+        }
+    }
+
+    return irreducibles;
+}
+
+auto factor_over_fp_and_lift_to_Q(const Polynomial& f_over_Q, int start, int stop, std::optional<int> k)
+    -> std::tuple<int, std::vector<Polynomial>, std::vector<Polynomial>>
+{
+    auto mutable_copy = f_over_Q.Copy_P();
+    const auto p = static_cast<int>(auto_choose_prime_for_hensel(mutable_copy, start, stop));
+    std::println("p: {}", p);
+    auto factors_mod_p = factor_mod_p(f_over_Q, p);
+    auto factors_over_Q = lift_factors_to_Q(f_over_Q, factors_mod_p, p, k);
+    return {p, std::move(factors_mod_p), std::move(factors_over_Q)};
+}
+
+auto factor_squarefree_over_Q(const Polynomial& f_over_Q, int start, int stop, std::optional<int> k) -> std::vector<Polynomial>
+{
+    if (f_over_Q.degree() <= 1) {
+        return {f_over_Q.Copy_P()};
+    }
+
+    auto [p, factors_mod_p, factors_over_Q] = factor_over_fp_and_lift_to_Q(f_over_Q, start, stop, k);
+    static_cast<void>(p);
+    static_cast<void>(factors_mod_p);
+    return factors_over_Q;
+}
+
+// Polynomial factorization using Yun's Algorithm for squarefree decomposition,
+// then distinct-degree factorization + Cantor-Zassenhaus + Hensel lifting for
+// each squarefree block.
+auto Polynomial::factor(Polynomial& f) -> std::list<Polynomial>
+{
+    InFixSerializer serializer {};
+    auto squarefree_factors = yuns(f);
+    std::println("yuns complete ({} squarefree factors)!", squarefree_factors.size() - 1);
+    std::list<Polynomial> fully_factored;
+
+    int i = 1;
+    for (auto it = std::next(squarefree_factors.begin()); it != squarefree_factors.end(); ++it, ++i) {
+        Polynomial& factor = *it;
+
+        auto exponent = Real{ static_cast<double>(i) };
+        if (factor.degree() <= 1) {
+            fully_factored.emplace_back(Exponent{ *factor.GetExpression(), exponent });
+            continue;
+        }
+
+        std::println("factor squarefree over Q: {}", factor.Accept(serializer).value());
+        const auto lifted_factors = factor_squarefree_over_Q(factor);
+        if (lifted_factors.empty()) {
+            fully_factored.emplace_back(Exponent{ *factor.GetExpression(), exponent });
+            continue;
+        }
+
+        for (const auto& lifted_factor : lifted_factors) {
+            if (i == 1) {
+                fully_factored.emplace_back(lifted_factor.Copy_P());
+                continue;
+            }
+
+            fully_factored.emplace_back(Exponent{ *lifted_factor.GetExpression(), exponent });
+        }
+    }
+
+    return fully_factored;
 }
 
 auto Polynomial::factor_l(Polynomial& f) -> std::unique_ptr<Expression>
@@ -1080,14 +1909,40 @@ auto positive_rep(Polynomial& poly, unsigned int modulus)
     return Polynomial(coeffs_mod);
 }
 
+// Mock random device for testing w/ deterministic numbers
+class MockRandomDevice {
+public:
+    using result_type = unsigned int;
 
+    // Allows setting a sequence of numbers to return
+    MockRandomDevice(std::vector<unsigned int> sequence) : seq(sequence) {}
+
+    result_type operator()() {
+        if (idx >= seq.size()) return 0; // Or wrap around
+        return seq[idx++];
+    }
+
+private:
+    std::vector<unsigned int> seq;
+    size_t idx = 0;
+};
+
+template <typename RandomGen>
+int get_random_choice(RandomGen& gen, int q) {
+    return gen() % q;
+}
 
 auto random_poly_mod(int q, int n)
 {
     // coeffs = [random.randrange(q) for _ in range(n)]
     // return Poly(coeffs, x, modulus=q)
     std::random_device rd;  // a seed source for the random number engine
-    std::mt19937 gen(42); // mersenne_twister_engine seeded with rd()
+
+    // test case 1 (initially did not factor degree-2 equal degree polynomial)
+    // static std::mt19937 gen(15429); // mersenne_twister_engine seeded with rd()
+
+    // test case 2
+    static std::mt19937 gen(7116); // mersenne_twister_engine seeded with rd()
     std::uniform_int_distribution<> distrib(0, q-1);
 
     // // Use distrib to transform the random unsigned int
@@ -1101,23 +1956,28 @@ auto random_poly_mod(int q, int n)
     for (int i = 0; i < n; ++i) {
         coeffs.emplace_back(Real{ static_cast<double>(distrib(gen)) }.Copy());
     }
+    std::println("q={}, n={}, coeffs=[{}]", q, n, print_expr_list(coeffs));
     return Polynomial(coeffs);
 }
 
-// only works with integer coefficients
-auto poly_mod(Polynomial& p, int modulus) -> Polynomial
+auto random_poly_mod_mock(int q, int n)
 {
-    std::println();
-    InFixSerializer serializer {};
-    auto coeffs = p.get_coefficients();
-    std::vector<std::unique_ptr<Expression>> coeffs_mod;
-    for (const auto& coeff : coeffs) {
-        auto t = RecursiveCast<Real>(*coeff)->GetValue();
-        std::println("coeff: {} => {}", t, mod(static_cast<long>(t),  modulus));
-        // coeffs_mod.emplace_back(Real{ static_cast<double>(static_cast<long>(RecursiveCast<Real>(*coeff)->GetValue()) % modulus) }.Copy());
-        coeffs_mod.emplace_back(Real{ static_cast<double>(mod(static_cast<long>(t), modulus)) }.Copy());
+
+    static MockRandomDevice mock_dev({4, 0, 3, 1, 4, 5});
+    // assert(get_random_choice(mock_dev) == 5 % 10);
+    // // Use distrib to transform the random unsigned int
+    // // generated by gen into an int in [1, 6]
+    // for (int n = 0; n != 10; ++n)
+    //     std::cout << distrib(gen) << ' ';
+    // std::cout << '\n';
+    // std::array<std::unique_ptr<Expression>, n> coeffs;
+    std::vector<std::unique_ptr<Expression>> coeffs;
+    coeffs.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        coeffs.emplace_back(Real{ static_cast<double>(get_random_choice(mock_dev, q)) }.Copy());
     }
-    return Polynomial {coeffs_mod};
+    std::println("q={}, n={}, coeffs=[{}]", q, n, print_expr_list(coeffs));
+    return Polynomial(coeffs);
 }
 
 // find the polynomial greatest common divisor of a and b, over the finite field/galois field q
@@ -1194,13 +2054,16 @@ auto poly_gcd_galois(Polynomial& a_orig, Polynomial& b_orig, const int q) -> Pol
 
 auto poly_pow_mod(Polynomial base, int exp, Polynomial& mod_poly, int modulus) -> Polynomial
 {
+    InFixSerializer ser {};
+    std::println("poly_pow_mod(base={}, exp={}, mod_poly={}, modulus={})", base.Accept(ser).value(), exp, mod_poly.Accept(ser).value(), modulus);
     // Compute base^exp % mod_poly using repeated squaring.
     Polynomial result = Polynomial{1};
     base = synthetic_divide(base, mod_poly).second;
+    std::println("synthetic divide success!");
 
-    InFixSerializer ser {};
+
     while (exp > 0) {
-        // std::println("result: {}\nbase: {}\nexp: {}\n", result.Accept(ser).value(), base.Accept(ser).value(), exp);
+        std::println("result: {}\nbase: {}\nexp: {}\n", result.Accept(ser).value(), base.Accept(ser).value(), exp);
         if (exp & 1) {
             auto tmp = result * base;
             auto tmp3 = tmp.expand();
@@ -1214,6 +2077,7 @@ auto poly_pow_mod(Polynomial base, int exp, Polynomial& mod_poly, int modulus) -
         auto tmp5 = poly_mod(tmp4, modulus);
         base = synthetic_divide(tmp5, mod_poly).second;
         base = poly_mod(base, modulus);
+        std::println("base now: {}\n", base.Accept(ser).value());
         // std::println("before mod {}: {}\nafter mod {}: {}\nafter mod {}: {}", modulus, tmp4.Accept(ser).value(), modulus, tmp5.Accept(ser).value(), mod_poly.Accept(ser).value(), base.Accept(ser).value());
         exp >>= 1;
     }
@@ -1237,8 +2101,10 @@ auto Polynomial::LC() const -> std::unique_ptr<Expression>
 
 // pick a good prime number for factoring a polynomial
 // and using hensel lifting to return the polynomial to standard form
-auto auto_choose_prime_for_hensel(Polynomial& f, int start = 3, int stop = 200) -> unsigned int
+auto auto_choose_prime_for_hensel(Polynomial& f, int start, int stop) -> unsigned int
 {
+    InFixSerializer serializer {};
+    std::println("auto_choose_prime_for_hensel({}, {}, {}) called!", start, stop, f.Accept(serializer).value());
     auto f_content = f.primitive_part();
 
     if (f_content.degree() <= 1)
@@ -1318,36 +2184,50 @@ auto distinct_degree_factor(Polynomial& f, int q) -> std::vector<std::pair<Polyn
 auto Polynomial::cantor_zassenhaus_equal_degree(Polynomial& f, int d, int q) -> std::vector<Polynomial>
 {
     InFixSerializer serializer {};
+
+    auto f_q = poly_mod(f, q);
     int n = f.degree();
 
     if (q % 2 == 0)
         throw std::runtime_error("Field order q must be odd.");
 
     int r = n / d;
-    std::vector<Polynomial> factors = {f};
+    std::vector<Polynomial> factors = {f_q};
     auto exp = (IntPower(q, d) - 1) / 2;
 
     while (factors.size() < r) {
-        auto h = random_poly_mod(q, n);
+        std::println("random_poly_mod({}, {})", q, n);
+        auto h = random_poly_mod_mock(q, n);
+        h = poly_mod(h, q);
 
-        auto g = poly_pow_mod(h, exp, f, q) - Polynomial {1};
-        g = synthetic_divide(g, f).second;
+        auto g = poly_pow_mod(h, exp, f_q, q) - Polynomial {1};
+        std::println("g before mod q: {}", g.Accept(serializer).value());
+        g = poly_mod(g, q);
+        std::println("g after mod q: {}", g.Accept(serializer).value());
+        g = synthetic_divide(g, f_q).second;
+        std::println("g after mod f_q: {}", g.Accept(serializer).value());
 
-        std::println("h = {}, g = {}, len(factors) = {}", h.Accept(serializer).value(), g.Accept(serializer).value(), factors.size());
+        std::println("h={}, g={}, len(factors)={}", h.Accept(serializer).value(), g.Accept(serializer).value(), factors.size());
 
         std::vector<Polynomial> new_factors;
         for (auto& u : factors) {
             if (u.degree() > d) {
-                auto gu = poly_gcd(g, u);
+                auto gu = poly_gcd_galois(g, u, q);
 
+                std::println("g={}, u={}, gu={}", g.Accept(serializer).value(), u.Accept(serializer).value(), gu.Accept(serializer).value());
+
+                // if (!(gu == Real{1}.Copy()) && !gu.GetExpression()->Equals(*u.GetExpression())) {
                 if (!(gu == Real{1}.Copy()) && gu.GetExpression() != u.GetExpression()) {
-                    new_factors.emplace_back(gu.monic());
+                    std::println("BRANCH A");
+                    new_factors.emplace_back(gu.monic(q));
                     auto tmp = synthetic_divide(u, gu).first;
-                    new_factors.emplace_back(tmp.monic());
+                    new_factors.emplace_back(tmp.monic(q));
                 } else {
+                    std::println("BRANCH B");
                     new_factors.emplace_back(u);
                 }
             } else {
+                std::println("BRANCH C");
                 new_factors.emplace_back(u);
             }
         }
