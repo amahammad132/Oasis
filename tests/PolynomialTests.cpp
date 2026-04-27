@@ -518,3 +518,140 @@ TEST_CASE("lift_factors_to_Q reconstructs a rational polynomial", "[polynomial][
     REQUIRE(product_denominator == original_denominator);
     REQUIRE(CoefficientsAsIntegers(product_cleared) == CoefficientsAsIntegers(original_cleared));
 }
+
+TEST_CASE("mod-p factorization and hensel lifting works correctly", "[polynomial][hensel]")
+{
+    SECTION("distinct_degree_factor matches the main-function example")
+    {
+        Oasis::Polynomial f1 {1, 8, 22, 21};
+
+        auto ddf = Oasis::distinct_degree_factor(f1, 7);
+        std::vector<Oasis::Polynomial> ddf_blocks;
+        ddf_blocks.reserve(ddf.size());
+        for (const auto& [block, degree] : ddf) {
+            ddf_blocks.push_back(block);
+            REQUIRE(degree >= 1);
+        }
+        auto ddf_product = Oasis::multiply_polynomials(ddf_blocks, 7).monic(7);
+        auto f1_mod_7 = Oasis::poly_mod(f1, 7).monic(7);
+
+        REQUIRE_FALSE(ddf.empty());
+        REQUIRE(CoefficientsAsIntegers(ddf_product) == CoefficientsAsIntegers(f1_mod_7));
+    }
+
+    SECTION("choose prime, factor mod p, then lift back to Q")
+    {
+        Oasis::Polynomial f2 {1, -4, -38, -63};
+        auto chosen_prime = Oasis::auto_choose_prime_for_hensel(f2, 3, 50);
+
+        auto f2_mod_p = Oasis::poly_mod(f2, static_cast<int>(chosen_prime)).monic(static_cast<int>(chosen_prime));
+        auto blocks = Oasis::distinct_degree_factor(f2_mod_p, static_cast<int>(chosen_prime));
+
+        std::vector<Oasis::Polynomial> factors_mod_p;
+        for (auto& [block, degree] : blocks) {
+            auto block_monic = block.monic(static_cast<int>(chosen_prime));
+            auto equal_degree_factors = Oasis::Polynomial::cantor_zassenhaus_equal_degree(
+                block_monic,
+                degree,
+                static_cast<int>(chosen_prime)
+            );
+            factors_mod_p.insert(factors_mod_p.end(), equal_degree_factors.begin(), equal_degree_factors.end());
+        }
+
+        auto lifted = Oasis::lift_factors_to_Q(f2, factors_mod_p, static_cast<int>(chosen_prime), 5);
+        auto lifted_product = Oasis::multiply_polynomials(lifted);
+        auto modular_product = Oasis::multiply_polynomials(factors_mod_p, static_cast<int>(chosen_prime))
+                                   .monic(static_cast<int>(chosen_prime));
+
+        REQUIRE(chosen_prime >= 3);
+        REQUIRE(blocks.size() == 2);
+        REQUIRE(factors_mod_p.size() == 2);
+        REQUIRE(CoefficientsAsIntegers(modular_product) == CoefficientsAsIntegers(f2_mod_p));
+        REQUIRE(CoefficientsAsIntegers(lifted_product) == CoefficientsAsIntegers(f2));
+
+        std::vector<int> lifted_degrees;
+        lifted_degrees.reserve(lifted.size());
+        for (const auto& factor : lifted) {
+            lifted_degrees.push_back(factor.degree());
+        }
+        std::sort(lifted_degrees.begin(), lifted_degrees.end());
+        REQUIRE(lifted_degrees == std::vector<int> {1, 2});
+    }
+}
+
+TEST_CASE("factor_squarefree_over_Q fully factors a squarefree polynomial", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, -4, -38, -63};
+    const auto factors = Oasis::factor_squarefree_over_Q(polynomial, 3, 50, 5);
+    const auto recombined = Oasis::multiply_polynomials(factors);
+
+    std::vector<int> factor_degrees;
+    factor_degrees.reserve(factors.size());
+    for (const auto& factor : factors) {
+        factor_degrees.push_back(factor.degree());
+    }
+    std::sort(factor_degrees.begin(), factor_degrees.end());
+
+    REQUIRE(CoefficientsAsIntegers(recombined) == CoefficientsAsIntegers(polynomial));
+    REQUIRE(factor_degrees == std::vector<int> {1, 2});
+}
+
+TEST_CASE("factor_mod_p and factor_over_fp_and_lift_to_Q work", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, -4, -38, -63};
+
+    SECTION("factor_mod_p returns irreducible modular factors")
+    {
+        const auto factors_mod_p = Oasis::factor_mod_p(polynomial, 5);
+        const auto recombined_mod_p = Oasis::multiply_polynomials(factors_mod_p, 5).monic(5);
+        const auto expected_mod_p = Oasis::poly_mod(polynomial, 5).monic(5);
+
+        REQUIRE(factors_mod_p.size() == 2);
+        REQUIRE(CoefficientsAsIntegers(recombined_mod_p) == CoefficientsAsIntegers(expected_mod_p));
+
+        std::vector<int> factor_degrees;
+        factor_degrees.reserve(factors_mod_p.size());
+        for (const auto& factor : factors_mod_p) {
+            factor_degrees.push_back(factor.degree());
+        }
+        std::sort(factor_degrees.begin(), factor_degrees.end());
+        REQUIRE(factor_degrees == std::vector<int> {1, 2});
+    }
+
+    SECTION("factor_over_fp_and_lift_to_Q chooses a prime and lifts exact factors")
+    {
+        const auto [prime, factors_mod_p, factors_over_q] = Oasis::factor_over_fp_and_lift_to_Q(polynomial, 3, 50, 5);
+        const auto modular_recombined = Oasis::multiply_polynomials(factors_mod_p, prime).monic(prime);
+        const auto lifted_recombined = Oasis::multiply_polynomials(factors_over_q);
+
+        REQUIRE(prime >= 3);
+        REQUIRE(factors_mod_p.size() == 2);
+        REQUIRE(factors_over_q.size() == 2);
+        REQUIRE(CoefficientsAsIntegers(modular_recombined) == CoefficientsAsIntegers(Oasis::poly_mod(polynomial, prime).monic(prime)));
+        REQUIRE(CoefficientsAsIntegers(lifted_recombined) == CoefficientsAsIntegers(polynomial));
+    }
+}
+
+TEST_CASE("factor_l returns all squarefree factors", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, -4, -38, -63};
+    auto factored_expression = Oasis::Polynomial::factor_l(polynomial);
+
+    Oasis::Multiply expected {
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {-9} },
+        Oasis::Add {
+            Oasis::Add {
+                Oasis::Exponent { Oasis::Variable {"x"}, Oasis::Real {2} },
+                Oasis::Multiply { Oasis::Real {5}, Oasis::Variable {"x"} }
+            },
+            Oasis::Real {7}
+        },
+    };
+
+    auto expected_expression = expected.Generalize();
+
+    OASIS_CAPTURE_WITH_SERIALIZER(*factored_expression);
+    OASIS_CAPTURE_WITH_SERIALIZER(*expected_expression);
+
+    REQUIRE(factored_expression->Equals(*expected_expression));
+}
