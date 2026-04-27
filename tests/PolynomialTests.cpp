@@ -632,7 +632,7 @@ TEST_CASE("factor_mod_p and factor_over_fp_and_lift_to_Q work", "[polynomial][fa
     }
 }
 
-TEST_CASE("factor_l returns all squarefree factors", "[polynomial][factor]")
+TEST_CASE("factor_l performs distinct-degree factorization", "[polynomial][factor]")
 {
     Oasis::Polynomial polynomial {1, -4, -38, -63};
     auto factored_expression = Oasis::Polynomial::factor_l(polynomial);
@@ -646,6 +646,105 @@ TEST_CASE("factor_l returns all squarefree factors", "[polynomial][factor]")
             },
             Oasis::Real {7}
         },
+    };
+
+    auto expected_expression = expected.Generalize();
+
+    OASIS_CAPTURE_WITH_SERIALIZER(*factored_expression);
+    OASIS_CAPTURE_WITH_SERIALIZER(*expected_expression);
+
+    REQUIRE(factored_expression->Equals(*expected_expression));
+}
+
+TEST_CASE("factor_l performs square-free factorization", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, 11, 40, 48};
+    auto factored_expression = Oasis::Polynomial::factor_l(polynomial);
+
+    Oasis::Multiply expected {
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {3} },
+        Oasis::Exponent {
+            Oasis::Add {
+                Oasis::Variable {"x"},
+                Oasis::Real {4}
+            },
+            Oasis::Real {2}
+        },
+    };
+
+    auto expected_expression = expected.Generalize();
+
+    OASIS_CAPTURE_WITH_SERIALIZER(*factored_expression);
+    OASIS_CAPTURE_WITH_SERIALIZER(*expected_expression);
+
+    REQUIRE(factored_expression->Equals(*expected_expression));
+}
+
+TEST_CASE("factor_l performs equal-degree factorization", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, 5, 6};
+    auto factored_expression = Oasis::Polynomial::factor_l(polynomial);
+
+    Oasis::Multiply expected {
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {2} },
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {3} }
+    };
+
+    auto expected_expression = expected.Generalize();
+
+    OASIS_CAPTURE_WITH_SERIALIZER(*factored_expression);
+    OASIS_CAPTURE_WITH_SERIALIZER(*expected_expression);
+
+    REQUIRE(factored_expression->Equals(*expected_expression));
+}
+
+TEST_CASE("factor_l performs combined square-free and distinct-degree factorization", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, -1, -6, 10, -15, 23, -8, 12};
+    auto factored_expression = Oasis::Polynomial::factor_l(polynomial);
+
+    Oasis::Multiply expected {
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {3} },
+        Oasis::Multiply {
+            Oasis::Exponent {
+                Oasis::Add {
+                    Oasis::Variable {"x"},
+                    Oasis::Real {-2}
+                },
+                Oasis::Real {2}
+            },
+            Oasis::Exponent {
+                Oasis::Add {
+                    Oasis::Exponent { Oasis::Variable {"x"}, Oasis::Real {2} },
+                    Oasis::Real {1}
+                },
+                Oasis::Real {2}
+            }
+        }
+    };
+
+    auto expected_expression = expected.Generalize();
+
+    OASIS_CAPTURE_WITH_SERIALIZER(*factored_expression);
+    OASIS_CAPTURE_WITH_SERIALIZER(*expected_expression);
+
+    REQUIRE(factored_expression->Equals(*expected_expression));
+}
+
+TEST_CASE("factor_l performs combined square-free and equal-degree factorization", "[polynomial][factor]")
+{
+    Oasis::Polynomial polynomial {1, 13, 62, 128, 96};
+    auto factored_expression = Oasis::Polynomial::factor_l(polynomial);
+
+    Oasis::Multiply expected {
+        Oasis::Multiply {
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {2} },
+        Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {3} }
+        },
+        Oasis::Exponent {
+            Oasis::Add { Oasis::Variable {"x"}, Oasis::Real {4} },
+            Oasis::Real {2}
+        }
     };
 
     auto expected_expression = expected.Generalize();
